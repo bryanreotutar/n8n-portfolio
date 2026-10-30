@@ -1,0 +1,978 @@
+{
+  "name": "TCS · ZenMaid → GHL Sync (via Zapier webhook)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## ZenMaid → GoHighLevel Sync\n**Total Clean Solution · learning project**\n\nZenMaid has no public API or webhooks, only a Zapier app. So a small Zap forwards each ZenMaid event to this webhook, and n8n does the GHL work with the official API v2.\n\n**What each ZenMaid event does in GHL**\n| event | GHL result |\n|---|---|\n| `customer_created` | upsert contact, tag `zenmaid-customer` |\n| `booking_created` / `one_time_service_created` | tags `zenmaid-customer` `zenmaid-booked`, opportunity → **Booked in ZenMaid** (won) |\n| `recurring_service_created` | tag `recurring-client`, opportunity → **Recurring Client** (won) |\n| `recurring_service_cancelled` | tag `recurring-cancelled` → fires GHL workflow 09 (win-back) |\n| `appointment_status_updated` (Completed) | tag `job-completed` → fires GHL workflow 08 (review request), log row |\n| `invoice_paid` | log row (revenue for the weekly report) |\n\n### Setup\n1. Import. Open **Config**, keep `dryRun: true`, click **Test workflow** on *Test with sample events*. The *Preview* node shows every GHL call it would make.\n2. GHL: Settings → Private Integrations → create a token with contacts, opportunities and calendars scopes.\n3. n8n credential **Header Auth**: name `Authorization`, value `Bearer <token>`. Select it on every **GHL ·** node.\n4. Fill `locationId`, `sharedSecret`, `sheetId` (optional) in Config, then `dryRun: false`.\n5. Zapier: one Zap per ZenMaid trigger → **Webhooks by Zapier · POST** to this workflow's production URL, payload type JSON, header `x-tcs-secret`, fields as in the README.\n6. Activate. Settings → Error workflow → this workflow.\n",
+        "height": 980,
+        "width": 900,
+        "color": 5
+      },
+      "id": "9261a62f-a8af-560b-8d22-ebc9710c1756",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1000,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### ① Receive → check secret → decide what this event means in GHL",
+        "height": 620,
+        "width": 1560,
+        "color": 7
+      },
+      "id": "f1f912b5-fa0b-5693-ae3d-b75a46779aaf",
+      "name": "Lane 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### ② GHL API: upsert contact → add tags → move/create the opportunity → log to Sheets → reply",
+        "height": 620,
+        "width": 2900,
+        "color": 6
+      },
+      "id": "652d1c8c-b2b0-5289-bd0c-226dc5f28000",
+      "name": "Lane 2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1520,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "tcs-zenmaid",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "3f1a83e9-f2d9-5a1d-abc3-925f1c037c1d",
+      "name": "ZenMaid event (POST /tcs-zenmaid)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        60
+      ],
+      "webhookId": "e3ae9778-01f7-5557-8d4b-2b6baeaaba51"
+    },
+    {
+      "parameters": {},
+      "id": "4e54200b-d3c9-5fe2-9ad3-46439c6b626b",
+      "name": "Test with sample events",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Five realistic events in the exact shape the Zapier step sends.\n// __sample lets these skip the secret check; real webhook calls can't set a top-level field.\nconst c = (first, last, email, phone) => ({ id: 'zm-' + first.toLowerCase(), first_name: first, last_name: last, email, phone, address: '1450 Larimer St', zip: '80202' });\nconst events = [\n  { event: 'booking_created', customer: c('Maria', 'Lopez', 'maria.lopez@example.com', '+17205550101'), appointment: { id: 'apt-101', date: '2026-10-21', service: 'Deep Clean', status: 'Scheduled', price: 260 } },\n  { event: 'appointment_status_updated', customer: c('Maria', 'Lopez', 'maria.lopez@example.com', '+17205550101'), appointment: { id: 'apt-101', date: '2026-10-21', service: 'Deep Clean', status: 'Completed', price: 260 } },\n  { event: 'invoice_paid', customer: c('Maria', 'Lopez', 'maria.lopez@example.com', '+17205550101'), invoice: { id: 'inv-5531', amount: 260 } },\n  { event: 'recurring_service_created', customer: c('James', 'Carter', 'j.carter@example.com', '+13035550188'), appointment: { id: 'rec-77', date: '2026-10-24', service: 'Standard Clean · every 2 weeks', status: 'Scheduled', price: 165 } },\n  { event: 'recurring_service_cancelled', customer: c('Priya', 'Nair', 'priya.nair@example.com', '+17205550144'), appointment: { id: 'rec-41', service: 'Standard Clean · weekly', status: 'Cancelled' } },\n];\nreturn events.map((body) => ({ json: { __sample: true, headers: {}, body } }));\n"
+      },
+      "id": "494b6d26-7a04-57af-90c8-7016388fa6fd",
+      "name": "Sample Events (demo)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// =====================================================================\n//  CONFIG: the only node you need to edit.\n// =====================================================================\nconst CONFIG = {\n  dryRun: true,                         // true = build every GHL call but don't send it (see \"Preview\")\n  sharedSecret: '__CHANGE_ME__',        // Zapier sends this in the x-tcs-secret header\n  ghlApiBase: 'https://services.leadconnectorhq.com',\n  locationId: '__GHL_LOCATION_ID__',    // Settings → Business Profile, or the id in the sub-account URL\n  salesPipelineName: 'Cleaning Sales',  // matched by name, so you never paste stage IDs\n  // Optional: GHL custom field IDs (Settings → Custom Fields → copy the field id). Leave '' to skip.\n  customFieldIds: { zenmaidCustomerId: '', lastCleanDate: '' },\n  completedStatuses: ['completed', 'complete', 'done', 'finished'],\n  sheetId: '',                          // Google Sheet id of the TCS Weekly Report file; '' = don't log\n  logTab: 'ZenMaid Log',\n};\n// ---------------------------------------------------------------------\nreturn $input.all().map((i) => ({ json: { config: CONFIG, input: i.json } }));\n"
+      },
+      "id": "033a97b0-31eb-567e-be41-556857dd58a5",
+      "name": "Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validates the request and turns one ZenMaid event into a plan of GHL changes.\n// Pure rules, no API calls, so the dry run shows exactly what would happen.\nconst cfg = $json.config;\nconst input = $json.input || {};\nconst headers = input.headers || {};\nconst body = input.body || {};\nconst fromSample = input.__sample === true;\n\nconst reject = (reason) => ({ json: { valid: false, reason, event: body.event || '' } });\nif (!fromSample && (!cfg.sharedSecret || cfg.sharedSecret === '__CHANGE_ME__' || headers['x-tcs-secret'] !== cfg.sharedSecret)) {\n  return reject('Missing or wrong x-tcs-secret header');\n}\n\nconst ev = String(body.event || '').toLowerCase().trim().replace(/[\\s-]+/g, '_');\nconst cu = body.customer || {};\nconst ap = body.appointment || {};\nconst inv = body.invoice || {};\nconst email = String(cu.email || '').trim().toLowerCase();\nconst phone = String(cu.phone || '').trim();\nif (!email && !phone) return reject('Customer has no email or phone, so GHL cannot match a contact');\n\nconst status = String(ap.status || '').toLowerCase().trim();\nconst completed = cfg.completedStatuses.includes(status);\nconst money = (v) => { const n = Number(String(v ?? '').replace(/[^0-9.\\-]/g, '')); return Number.isFinite(n) ? n : 0; };\n\n// event → tags, opportunity stage, opportunity status, log row?\nconst RULES = {\n  customer_created:            { tags: ['zenmaid-customer'] },\n  booking_created:             { tags: ['zenmaid-customer', 'zenmaid-booked'], stage: 'Booked in ZenMaid', oppStatus: 'won', log: true },\n  one_time_service_created:    { tags: ['zenmaid-customer', 'zenmaid-booked'], stage: 'Booked in ZenMaid', oppStatus: 'won', log: true },\n  recurring_service_created:   { tags: ['zenmaid-customer', 'recurring-client'], stage: 'Recurring Client', oppStatus: 'won', log: true },\n  recurring_service_cancelled: { tags: ['recurring-cancelled'], log: true },\n  appointment_status_updated:  completed ? { tags: ['job-completed'], log: true, lastClean: true } : { tags: [], log: status === 'cancelled' || status === 'canceled' },\n  invoice_paid:                { tags: [], log: true },\n};\nconst rule = RULES[ev];\nif (!rule) return reject(`Unknown event \"${body.event}\". Expected one of: ${Object.keys(RULES).join(', ')}`);\n\nconst customFields = [];\nif (cfg.customFieldIds.zenmaidCustomerId && cu.id) customFields.push({ id: cfg.customFieldIds.zenmaidCustomerId, field_value: String(cu.id) });\nif (cfg.customFieldIds.lastCleanDate && rule.lastClean && ap.date) customFields.push({ id: cfg.customFieldIds.lastCleanDate, field_value: String(ap.date) });\n\nconst contact = {\n  locationId: cfg.locationId,\n  firstName: cu.first_name || undefined,\n  lastName: cu.last_name || undefined,\n  email: email || undefined,\n  phone: phone || undefined,\n  address1: cu.address || undefined,\n  postalCode: cu.zip ? String(cu.zip) : undefined,\n  source: 'ZenMaid',\n  ...(customFields.length ? { customFields } : {}),\n};\n\nconst name = [cu.first_name, cu.last_name].filter(Boolean).join(' ') || email || phone;\nconst logRow = rule.log ? {\n  'Received At': DateTime.now().setZone('America/Denver').toISO({ suppressMilliseconds: true }),\n  'Event': ev,\n  'Customer': name,\n  'Email': email,\n  'Phone': phone,\n  'Appointment Date': ap.date || '',\n  'Service': ap.service || '',\n  'Status': ap.status || (ev === 'invoice_paid' ? 'Paid' : ''),\n  'Amount': ev === 'invoice_paid' ? money(inv.amount) : money(ap.price),\n  'Invoice ID': inv.id || '',\n  'Appointment ID': ap.id || '',\n  'ZenMaid Customer ID': cu.id || '',\n} : null;\n\nreturn { json: {\n  valid: true,\n  event: ev,\n  name,\n  plan: {\n    contact,\n    tags: rule.tags,\n    stage: rule.stage || null,\n    oppStatus: rule.oppStatus || 'open',\n    oppName: `${name} · ${ap.service || 'Cleaning'}`,\n    monetaryValue: money(ap.price),\n    logRow,\n  },\n} };\n",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "3505e348-dd0f-5079-a24a-e112d6786a7b",
+      "name": "Normalize & Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ae3d2004-8211-5a35-9926-f2d3bf6f82c0",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "9500a2b3-6ecb-5332-96fe-ab1a96d97b43",
+      "name": "Valid event?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: false, reason: $json.reason } }}",
+        "options": {
+          "responseCode": 401
+        }
+      },
+      "id": "3726926a-67e3-59ea-be0b-fe01b44bb54a",
+      "name": "Respond · 401 Rejected",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9be701a7-454a-5610-9da7-77eaae52d150",
+              "leftValue": "={{ $('Config').first().json.config.dryRun }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d1a48bc8-2a39-5b96-9127-caeee85e7a98",
+      "name": "Dry run?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Shows exactly what live mode would send to GHL and Google Sheets for this event.\nconst cfg = $('Config').first().json.config;\nconst p = $json.plan;\nconst calls = [\n  { step: 'Upsert contact', method: 'POST', url: `${cfg.ghlApiBase}/contacts/upsert`, body: p.contact },\n];\nif (p.tags.length) calls.push({ step: 'Add tags', method: 'POST', url: `${cfg.ghlApiBase}/contacts/{contactId}/tags`, body: { tags: p.tags } });\nif (p.stage) calls.push({ step: `Opportunity → \"${p.stage}\" (${p.oppStatus}) in \"${cfg.salesPipelineName}\"`, method: 'PUT or POST', url: `${cfg.ghlApiBase}/opportunities/…` });\nif (p.logRow) calls.push({ step: cfg.sheetId ? `Append row to \"${cfg.logTab}\"` : 'Log row (skipped: no sheetId)', row: p.logRow });\nreturn { json: { dryRun: true, event: $json.event, customer: $json.name, calls } };\n",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "78a0cc13-25da-531e-bd82-4b0e4dd71477",
+      "name": "Preview (dry run)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.config.ghlApiBase }}/contacts/upsert",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.plan.contact) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "30aa00a2-adf9-50d4-bf20-fd18a8ad8fdd",
+      "name": "GHL · Upsert Contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1580,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "const id = $json.contact?.id || $json.id;\nif (!id) throw new Error('GHL upsert returned no contact id: ' + JSON.stringify($json).slice(0, 300));\nconst n = $('Normalize & Plan').item.json;\nreturn { json: { contactId: id, isNew: $json.new === true, event: n.event, name: n.name, plan: n.plan } };\n",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "5dc6b90c-ae0d-566e-840c-be590ca0e525",
+      "name": "Contact ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1800,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "76505f9f-8afc-5989-ba73-3aa6eef8599e",
+              "leftValue": "={{ $json.plan.tags.length > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7b1eda97-bd41-5f35-984d-964b0438c7ad",
+      "name": "Any tags?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2020,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.config.ghlApiBase }}/contacts/{{ $json.contactId }}/tags",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ tags: $json.plan.tags }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "dbee0c53-cf0a-5ff4-a3d9-55253aea55f5",
+      "name": "GHL · Add Tags",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2240,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Restores the plan after the tag call (its response replaces the item).\nreturn { json: $('Contact ID').item.json };\n",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "8da7fba5-fb98-56d4-9d11-0ab1235eeea3",
+      "name": "Carry Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2460,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "df6766a7-4c31-51af-b4ab-0f234447b633",
+              "leftValue": "={{ !!$json.plan.stage }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c370b17f-296d-5fc7-9492-d33d9208ceaf",
+      "name": "Move opportunity?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2680,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Config').first().json.config.ghlApiBase }}/opportunities/pipelines",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "locationId",
+              "value": "={{ $('Config').first().json.config.locationId }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "ec4f7896-fedf-515a-ba4c-4b7e936f0a4e",
+      "name": "GHL · Pipelines",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2900,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Config').first().json.config.ghlApiBase }}/opportunities/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "location_id",
+              "value": "={{ $('Config').first().json.config.locationId }}"
+            },
+            {
+              "name": "contact_id",
+              "value": "={{ $('Carry Plan').item.json.contactId }}"
+            },
+            {
+              "name": "limit",
+              "value": "20"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "834a3eb3-f3f9-5540-a458-33e01b75cfa1",
+      "name": "GHL · Find Opportunity",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3120,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Finds the pipeline + stage by name, then decides: move the contact's open deal, or create one.\nconst cfg = $('Config').first().json.config;\nconst c = $('Carry Plan').item.json;\nconst pipes = $('GHL · Pipelines').item.json.pipelines || [];\nconst pipe = pipes.find((p) => p.name.trim().toLowerCase() === cfg.salesPipelineName.toLowerCase());\nif (!pipe) throw new Error(`Pipeline \"${cfg.salesPipelineName}\" not found. Have: ${pipes.map((p) => p.name).join(', ')}`);\nconst stage = (pipe.stages || []).find((s) => s.name.trim().toLowerCase() === c.plan.stage.toLowerCase());\nif (!stage) throw new Error(`Stage \"${c.plan.stage}\" not found in \"${pipe.name}\". Have: ${(pipe.stages || []).map((s) => s.name).join(', ')}`);\n\nconst opps = ($json.opportunities || []).filter((o) => o.pipelineId === pipe.id);\nconst existing = opps.find((o) => o.status === 'open') || opps[0];\nconst base = cfg.ghlApiBase;\nconst body = { pipelineId: pipe.id, pipelineStageId: stage.id, status: c.plan.oppStatus };\nif (c.plan.monetaryValue) body.monetaryValue = c.plan.monetaryValue;\n\nreturn { json: existing\n  ? { ...c, method: 'PUT', url: `${base}/opportunities/${existing.id}`, body }\n  : { ...c, method: 'POST', url: `${base}/opportunities/`, body: { ...body, locationId: cfg.locationId, contactId: c.contactId, name: c.plan.oppName } } };\n",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "650e5230-d9b9-5dbd-9ab9-013c1a5cdf52",
+      "name": "Create or Update?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3340,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "={{ $json.method }}",
+        "url": "={{ $json.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "4a6d92fc-4df3-5424-8041-f9a8dcb09178",
+      "name": "GHL · Save Opportunity",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3560,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "db38433f-3864-5a56-ad15-ce2aa7f6cf20",
+              "leftValue": "={{ !!$('Carry Plan').item.json.plan.logRow && !!$('Config').first().json.config.sheetId }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "cc5297f2-f079-5afa-bbb3-ee936bee97a1",
+      "name": "Log to sheet?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3780,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return { json: $('Carry Plan').item.json.plan.logRow };",
+        "mode": "runOnceForEachItem"
+      },
+      "id": "06717ddb-55dc-5847-9c2d-fb3ec960b2d4",
+      "name": "Log Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4000,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Config').first().json.config.sheetId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $('Config').first().json.config.logTab }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "1746ab3a-a1a7-5eb1-ae8e-a3665e4d4d53",
+      "name": "Sheets · Append ZenMaid Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        4220,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, event: $('Carry Plan').item.json.event } }}",
+        "options": {}
+      },
+      "id": "c1fd0339-c4fa-5a54-8389-7de3cbe97841",
+      "name": "Respond · 200 OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        4220,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Error alerts\nSettings → Error workflow → this workflow, so a failure emails you.",
+        "height": 260,
+        "width": 760,
+        "color": 2
+      },
+      "id": "1643cc71-9e63-5681-bc0d-2974c81cb591",
+      "name": "Lane · Errors",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        680
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "2566baaa-bc93-5009-8baf-0310f53cf680",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// The Config node doesn't run in an error execution, so the alert address lives here.\nconst ALERT_TO = '__YOUR_EMAIL__';\nconst e = $input.first().json;\nconst node = e.execution?.lastNodeExecuted || e.trigger?.error?.node?.name || 'unknown';\nconst msg = String(e.execution?.error?.message || e.trigger?.error?.message || 'Unknown error').slice(0, 600);\nreturn [{ json: {\n  to: ALERT_TO,\n  subject: `Automation error: ${e.workflow?.name || 'ZenMaid sync'} (${node})`,\n  html: `<p><b>Workflow:</b> ${e.workflow?.name}<br><b>Failed node:</b> ${node}<br><b>Error:</b> ${msg}</p>` +\n        (e.execution?.url ? `<p><a href=\"${e.execution.url}\">Open the execution</a></p>` : ''),\n} }];\n"
+      },
+      "id": "52906887-fd56-5a08-b643-bb65ab5b2dcd",
+      "name": "Format Error Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "8807c0cf-acc7-5988-8bb7-3548f602b164",
+      "name": "Gmail · Error Alert",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        440,
+        760
+      ],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "ZenMaid event (POST /tcs-zenmaid)": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Test with sample events": {
+      "main": [
+        [
+          {
+            "node": "Sample Events (demo)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sample Events (demo)": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Normalize & Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize & Plan": {
+      "main": [
+        [
+          {
+            "node": "Valid event?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid event?": {
+      "main": [
+        [
+          {
+            "node": "Dry run?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond · 401 Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dry run?": {
+      "main": [
+        [
+          {
+            "node": "Preview (dry run)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "GHL · Upsert Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL · Upsert Contact": {
+      "main": [
+        [
+          {
+            "node": "Contact ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contact ID": {
+      "main": [
+        [
+          {
+            "node": "Any tags?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any tags?": {
+      "main": [
+        [
+          {
+            "node": "GHL · Add Tags",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Carry Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL · Add Tags": {
+      "main": [
+        [
+          {
+            "node": "Carry Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Carry Plan": {
+      "main": [
+        [
+          {
+            "node": "Move opportunity?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Move opportunity?": {
+      "main": [
+        [
+          {
+            "node": "GHL · Pipelines",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log to sheet?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL · Pipelines": {
+      "main": [
+        [
+          {
+            "node": "GHL · Find Opportunity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL · Find Opportunity": {
+      "main": [
+        [
+          {
+            "node": "Create or Update?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create or Update?": {
+      "main": [
+        [
+          {
+            "node": "GHL · Save Opportunity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL · Save Opportunity": {
+      "main": [
+        [
+          {
+            "node": "Log to sheet?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to sheet?": {
+      "main": [
+        [
+          {
+            "node": "Log Row",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond · 200 OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Row": {
+      "main": [
+        [
+          {
+            "node": "Sheets · Append ZenMaid Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets · Append ZenMaid Log": {
+      "main": [
+        [
+          {
+            "node": "Respond · 200 OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Format Error Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Error Alert": {
+      "main": [
+        [
+          {
+            "node": "Gmail · Error Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Denver",
+    "saveManualExecutions": true
+  },
+  "tags": []
+}

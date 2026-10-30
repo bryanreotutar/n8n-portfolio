@@ -1,0 +1,3148 @@
+{
+  "name": "Allied Health Automation Suite (DEMO – all in one)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 00 · Check what the Halaxy API can actually do\nRun this **before** building anything.\n\nIt reads Halaxy's FHIR `/metadata` CapabilityStatement and lists, per resource (Patient, Appointment, Referral, Invoice…), which interactions are allowed (read / search-type / create / update) and which search parameters exist.\n\nThis decides the design: e.g. whether referrals can be **created** via API or must be attached by staff, and whether patients can be searched by birthdate/telecom.\n\nAlso confirms the API key's scopes – a 401/403 here means the key is missing a scope.",
+        "height": 340,
+        "width": 520,
+        "color": 5
+      },
+      "id": "17c0ef35-14c7-4cfe-b403-d5219dc9729f",
+      "name": "Sticky Note 1 [00]",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1664,
+        3440
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "77edf1ce-a83d-40ec-99c4-39048deb5493",
+      "name": "Run Check",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        1744,
+        3872
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3f4455f6-5281-4491-8856-c139e4cc4e92",
+              "name": "halaxyBaseUrl",
+              "value": "https://au-api.halaxy.com/main",
+              "type": "string"
+            },
+            {
+              "id": "8b0064ac-994d-4b08-98b6-0f4f3861dcb7",
+              "name": "halaxyUserAgent",
+              "value": "AlliedHealth-Automation (__YOUR_EMAIL__)",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "1d076f76-9391-4c6e-80fe-aefd4691f138",
+      "name": "Config [00]",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1968,
+        3872
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { token_type: 'Bearer', access_token: 'demo-token', expires_in: 900 } }];"
+      },
+      "id": "fe404232-ed5a-4378-9fbc-22cceeafa411",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "notesInFlow": true,
+      "name": "Halaxy: Get Token [00]",
+      "position": [
+        2192,
+        3872
+      ],
+      "onError": "continueErrorOutput",
+      "notes": "DEMO – sample Halaxy data (swap back to the live HTTP node when you have a Halaxy API key)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// SAMPLE ONLY – illustrates the shape of a FHIR CapabilityStatement.\n// The real Halaxy answer comes from GET /metadata once you have an API key.\nconst r = (type, codes, params) => ({ type, interaction: codes.map(code => ({ code })), searchParam: params.map(name => ({ name })) });\nreturn [{ json: { resourceType: 'CapabilityStatement', status: 'active', fhirVersion: '4.3.0', rest: [{ mode: 'server', resource: [\n  r('Patient', ['read', 'search-type', 'create', 'update'], ['family', 'given', 'birthdate', 'email', 'phone', '_lastUpdated']),\n  r('Appointment', ['read', 'search-type', 'create', 'update'], ['date', 'status', 'patient', 'practitioner', '_lastUpdated']),\n  r('Referral', ['read', 'search-type', 'create'], ['patient', '_lastUpdated']),\n  r('Invoice', ['read', 'search-type'], ['status', 'date', '_lastUpdated']),\n  r('Practitioner', ['read', 'search-type'], ['name']),\n  r('DocumentReference', ['create', 'patch'], [])\n] }] } }];"
+      },
+      "id": "ea1f9f3a-c150-4293-8ca7-dc806b5b6d53",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "notesInFlow": true,
+      "name": "Halaxy: Get CapabilityStatement",
+      "position": [
+        2416,
+        3872
+      ],
+      "notes": "DEMO – sample Halaxy data (swap back to the live HTTP node when you have a Halaxy API key)"
+    },
+    {
+      "parameters": {
+        "jsCode": "const cs = $input.first().json;\nconst resources = (cs.rest && cs.rest[0] && cs.rest[0].resource) || [];\nconst focus = ['Patient', 'Appointment', 'Referral', 'ServiceRequest', 'Invoice', 'Slot', 'Schedule',\n  'Practitioner', 'PractitionerRole', 'HealthcareService', 'Coverage', 'DocumentReference', 'Communication', 'Task'];\nconst rows = resources.map(r => ({\n  resource: r.type,\n  inFocus: focus.includes(r.type),\n  canRead: (r.interaction || []).some(i => i.code === 'read'),\n  canSearch: (r.interaction || []).some(i => i.code === 'search-type'),\n  canCreate: (r.interaction || []).some(i => i.code === 'create'),\n  canUpdate: (r.interaction || []).some(i => ['update', 'patch'].includes(i.code)),\n  interactions: (r.interaction || []).map(i => i.code).join(', '),\n  searchParams: (r.searchParam || []).map(s => s.name).join(', ')\n}));\nrows.sort((a, b) => (b.inFocus - a.inFocus) || a.resource.localeCompare(b.resource));\nreturn rows.map(json => ({ json }));"
+      },
+      "id": "9f5a0566-ed90-4a3d-82c0-f43e30c5040c",
+      "name": "Summarise Capabilities",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2624,
+        3872
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## DEMO MODE\nThe two Halaxy steps return **sample data**, so this runs without a Halaxy account. Just click **Execute workflow**.",
+        "height": 200,
+        "width": 520,
+        "color": 2
+      },
+      "id": "ca5ddada-a09f-4d82-a279-8ab99bad1fab",
+      "name": "Demo Banner [00]",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2208,
+        3440
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 01 · Emailed referral → Halaxy\n**Outlook** (Microsoft Graph OAuth2) → **Groq LLM** (API key) → **Halaxy** (FHIR, OAuth2 client-credentials).\n\n1. Poll the *Referrals* folder; skip emails already processed (persistent dedupe on message ID).\n2. Strip HTML and **tokenise identifiers locally** – phones, emails, Medicare & NDIS numbers become `[PHONE_1]` etc. The AI never sees them; we map tokens back afterwards.\n3. The LLM extracts structured fields only (no free-text clinical notes) and flags risk language.\n4. Deterministic validation – AI output is never written to Halaxy unchecked.\n5. Match existing client (surname + DOB search, then score given name / phone / email).\n6. Exact single match → attach referral. No match → create client. Anything ambiguous, incomplete, urgent or failing → **staff review queue**.",
+        "height": 430,
+        "width": 620,
+        "color": 4
+      },
+      "id": "85fec265-975c-4c23-80b3-33af6b7a64e4",
+      "name": "Sticky Note 1 [01]",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2096,
+        4368
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Exceptions → humans\nEverything that isn't clean goes here: incomplete referral, low AI confidence, **possible risk indicators (same-day clinician review)**, possible duplicate client, or any API error.\n\nStaff get an email with the reason and initials only – full details stay in the original email (moved to *Needs Review*) – and every exception is logged to the audit sheet.",
+        "height": 260,
+        "width": 460,
+        "color": 3
+      },
+      "id": "b53b1314-b549-426e-a24b-8c89fc350b1b",
+      "name": "Sticky Note 2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        4384,
+        5328
+      ]
+    },
+    {
+      "parameters": {
+        "content": "⚠️ **Referral field names**: Halaxy uses its own property names for referrals. Confirm the body of *Halaxy: Create Referral* against the Halaxy API docs / Workflow 00 before going live. If the create fails, the client is still matched/created and staff are asked to attach the referral manually – nothing is lost.",
+        "height": 200,
+        "width": 420,
+        "color": 6
+      },
+      "id": "da0d90cd-b31c-40d6-a2a9-22dd531c3cd2",
+      "name": "Sticky Note 3",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        5008,
+        4528
+      ]
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "output": "raw",
+        "filters": {},
+        "options": {}
+      },
+      "id": "25b3bc21-a5c8-45a7-8851-4daadb084249",
+      "name": "New Referral Email",
+      "type": "n8n-nodes-base.microsoftOutlookTrigger",
+      "typeVersion": 1,
+      "position": [
+        2144,
+        4880
+      ],
+      "notesInFlow": true,
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "name": "Microsoft Outlook account"
+        }
+      },
+      "disabled": true,
+      "notes": "Switched off for the demo – use 'Demo: Run With Sample Referrals'. Switch on once Outlook is connected."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "93299844-7d11-4687-81ff-a8dce70693db",
+              "name": "halaxyBaseUrl",
+              "value": "https://au-api.halaxy.com/main",
+              "type": "string"
+            },
+            {
+              "id": "109bc90b-c158-4a3e-91e2-13eb6a2b4005",
+              "name": "halaxyUserAgent",
+              "value": "AlliedHealth-Automation (__YOUR_EMAIL__)",
+              "type": "string"
+            },
+            {
+              "id": "679c7b08-053f-4493-a0ec-5e33d2128582",
+              "name": "aiModel",
+              "value": "openai/gpt-oss-120b",
+              "type": "string"
+            },
+            {
+              "id": "7ec86ee1-3b39-424c-8a78-15ea5ce92d72",
+              "name": "intakeMailbox",
+              "value": "__YOUR_EMAIL__",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "1a3990f5-8c65-4e9c-99d4-09cc08095b33",
+      "name": "Config [01]",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2368,
+        4880
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "removeItemsRepeatedInPreviousExecutions"
+      },
+      "id": "5f9c202b-302a-461b-9579-28743fb1271f",
+      "name": "Skip Already-Processed Emails",
+      "type": "n8n-nodes-base.removeDuplicates",
+      "typeVersion": 2,
+      "position": [
+        2592,
+        4880
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Clean the email and swap identifiers for tokens BEFORE anything is sent to the AI.\nconst m = $json;\nconst html = (m.body && m.body.content) || m.bodyPreview || '';\nlet text = html\n  .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ')\n  .replace(/<br\\s*\\/?>|<\\/p>|<\\/div>/gi, '\\n')\n  .replace(/<[^>]+>/g, ' ')\n  .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')\n  .replace(/[ \\t]+/g, ' ').replace(/\\n\\s*\\n+/g, '\\n').trim();\n\nconst tokens = {};\nconst counters = {};\nfunction tokenise(re, label, clean = v => v) {\n  text = text.replace(re, (match) => {\n    const value = clean(match);\n    const existing = Object.keys(tokens).find(k => k.startsWith(label) && tokens[k] === value);\n    if (existing) return `[${existing}]`;\n    counters[label] = (counters[label] || 0) + 1;\n    const key = `${label}_${counters[label]}`;\n    tokens[key] = value;\n    return `[${key}]`;\n  });\n}\ntokenise(/[\\w.+-]+@[\\w-]+(\\.[\\w-]+)+/g, 'EMAIL', v => v.toLowerCase());\ntokenise(/\\b\\d{4}\\s?\\d{5}\\s?\\d(?:[\\s\\/-]?\\d)?\\b/g, 'MEDICARE', v => v.replace(/\\D/g, ''));   // 10-11 digits\ntokenise(/(?:\\+?61\\s?|\\b0)4\\d{2}[\\s-]?\\d{3}[\\s-]?\\d{3}\\b/g, 'PHONE', v => v.replace(/\\D/g, '').replace(/^61/, '0'));\ntokenise(/(?:\\+?61\\s?|\\b0)[2378][\\s-]?\\d{4}[\\s-]?\\d{4}\\b/g, 'PHONE', v => v.replace(/\\D/g, '').replace(/^61/, '0'));\ntokenise(/\\b\\d{9}\\b/g, 'IDNUM');   // e.g. NDIS numbers\n\nreturn {\n  json: {\n    messageId: m.id,\n    internetMessageId: m.internetMessageId || m.id,\n    fromAddress: (m.from && m.from.emailAddress && m.from.emailAddress.address) || '',\n    fromName: (m.from && m.from.emailAddress && m.from.emailAddress.name) || '',\n    subject: m.subject || '',\n    receivedAt: m.receivedDateTime || new Date().toISOString(),\n    hasAttachments: !!m.hasAttachments,\n    redactedText: text.slice(0, 8000),\n    tokens            // stays inside n8n – never sent to the AI\n  }\n};"
+      },
+      "id": "0d972418-1a6e-405a-ac6f-8a7102a93177",
+      "name": "Pre-process & Tokenise Identifiers",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2816,
+        4880
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $('Config [01]').first().json.aiModel, temperature: 0, max_completion_tokens: 2048, reasoning_effort: 'low', response_format: { type: 'json_object' }, messages: [{ role: 'system', content: \"You extract structured data from referral emails sent to an Australian multidisciplinary allied health practice (psychology, exercise physiology, occupational therapy, personal training, chronic condition management). Phone numbers, emails, Medicare and other ID numbers have been replaced with tokens such as [PHONE_1] or [MEDICARE_1]. When a field refers to one of these, return the token name (e.g. PHONE_1) - never guess a real value. Return ONLY a JSON object with exactly these keys: givenName, familyName, dateOfBirth (YYYY-MM-DD), clientPhoneToken, clientEmailToken, medicareToken, ndisToken, referrerName, referrerPractice, referrerProviderNumber, referralDate (YYYY-MM-DD), serviceRequested (one of: psychology, exercise_physiology, occupational_therapy, personal_training, chronic_condition_management, unclear), fundingType (one of: medicare_mhtp, medicare_cdm, ndis, dva, workcover, private, unclear), reasonSummary (max 15 words, triage level only, no detailed history), riskIndicators (true if the email mentions self-harm, suicidal thoughts, harm to others, abuse/neglect, or asks for urgent or same-day contact), riskNote (max 15 words or null), confidence (0 to 1). Use null for anything not clearly stated. Do not infer, guess or invent values. Dates in the email are Australian format (DD/MM/YYYY). The client is the patient being referred, not the referrer.\" }, { role: 'user', content: 'Subject: ' + $json.subject + '\\n\\nEmail body:\\n' + $json.redactedText }] }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 2500
+            }
+          }
+        }
+      },
+      "id": "ca883a1e-25af-45f4-b4b2-fe3e73d8cd6d",
+      "name": "AI: Extract Referral Fields (Groq)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3024,
+        4880
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Groq: Allied Health Automation Suite"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Never trust AI output blindly: parse, de-tokenise locally, then validate with plain rules.\nconst pre = $('Pre-process & Tokenise Identifiers').item.json;\nconst base = { ...pre };\ndelete base.redactedText;           // email text is not carried any further\nconst raw = ($json.choices && $json.choices[0] && $json.choices[0].message && $json.choices[0].message.content) || '';\nlet r = null;\ntry { r = JSON.parse(raw.replace(/```json|```/g, '').trim()); } catch (e) { r = null; }\nif (!r) {\n  return { json: { ...base, status: 'exception', readyForHalaxy: false, missing: [], warnings: [],\n    exceptionReason: 'AI output could not be parsed – please process manually' } };\n}\n\nconst detok = t => (t ? (pre.tokens[String(t).replace(/[\\[\\]]/g, '')] || null) : null);\nconst clean = v => (typeof v === 'string' && v.trim() ? v.trim() : null);\nconst referral = {\n  givenName: clean(r.givenName),\n  familyName: clean(r.familyName),\n  dateOfBirth: clean(r.dateOfBirth),\n  phone: detok(r.clientPhoneToken),\n  email: detok(r.clientEmailToken),\n  medicare: detok(r.medicareToken),\n  ndisNumber: detok(r.ndisToken),\n  referrerName: clean(r.referrerName),\n  referrerPractice: clean(r.referrerPractice),\n  referrerProviderNumber: clean(r.referrerProviderNumber),\n  referralDate: clean(r.referralDate),\n  serviceRequested: r.serviceRequested || 'unclear',\n  fundingType: r.fundingType || 'unclear',\n  reasonSummary: clean(r.reasonSummary)\n};\n\nconst SERVICES = ['psychology', 'exercise_physiology', 'occupational_therapy', 'personal_training', 'chronic_condition_management'];\nconst isDate = d => /^\\d{4}-\\d{2}-\\d{2}$/.test(d || '') && !isNaN(new Date(d));\nconst missing = [];\nif (!referral.givenName) missing.push('client given name');\nif (!referral.familyName) missing.push('client family name');\nif (!isDate(referral.dateOfBirth) || new Date(referral.dateOfBirth) > new Date()) missing.push('valid date of birth');\nif (!referral.phone && !referral.email) missing.push('client phone or email');\nif (!referral.referrerName) missing.push('referrer name');\nif (!SERVICES.includes(referral.serviceRequested)) missing.push('service requested');\n\nconst warnings = [];\nif (isDate(referral.referralDate) && (Date.now() - new Date(referral.referralDate)) / 86400000 > 365)\n  warnings.push('Referral dated over 12 months ago – check it is still valid');\nif (referral.fundingType === 'unclear') warnings.push('Funding type unclear');\nif (pre.hasAttachments) warnings.push('Email has attachments – check referral letter is saved to the client file');\nconst confidence = typeof r.confidence === 'number' ? r.confidence : 0;\n\nlet status = 'complete', exceptionReason = null;\nif (r.riskIndicators === true) {\n  status = 'urgent';\n  exceptionReason = 'POSSIBLE RISK INDICATOR – clinician to review today' + (r.riskNote ? ` (${r.riskNote})` : '');\n} else if (missing.length) {\n  status = 'incomplete';\n  exceptionReason = 'Incomplete referral – missing: ' + missing.join(', ');\n} else if (confidence < 0.7) {\n  status = 'low_confidence';\n  exceptionReason = `Low AI extraction confidence (${confidence}) – please verify`;\n}\n\nreturn { json: { ...base, referral, missing, warnings, aiConfidence: confidence, status, exceptionReason,\n  readyForHalaxy: status === 'complete' } };"
+      },
+      "id": "a97048e4-881b-458c-b9d2-b9f120edf63f",
+      "name": "Parse & Validate Referral",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3248,
+        4880
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "077e97c8-5d49-48da-bee8-505bf5b6b44e",
+              "leftValue": "={{ $json.readyForHalaxy }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "948399b3-7fd4-4c01-8940-09945664bb0e",
+      "name": "Ready for Halaxy?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3472,
+        4880
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return { json: { token_type: 'Bearer', access_token: 'demo-token', expires_in: 900 } };"
+      },
+      "id": "c856c230-d646-4e2e-96a3-1b441bc6f9c3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "notesInFlow": true,
+      "name": "Halaxy: Get Token [01]",
+      "position": [
+        3696,
+        4768
+      ],
+      "onError": "continueErrorOutput",
+      "notes": "DEMO – sample Halaxy data (swap back to the live HTTP node when you have a Halaxy API key)"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Sample Halaxy client list (fictional people).\nconst DB = [\n  { resourceType: 'Patient', id: 'demo-1001', name: [{ family: 'Ellis', given: ['Morgan'] }], birthDate: '1985-06-02',\n    telecom: [{ system: 'phone', value: '0400 111 222' }, { system: 'email', value: 'morgan.ellis@example.com' }] },\n  { resourceType: 'Patient', id: 'demo-1002', name: [{ family: 'Nguyen', given: ['Casey'] }], birthDate: '1990-01-01',\n    telecom: [{ system: 'phone', value: '0400 333 444' }] },\n  { resourceType: 'Patient', id: 'demo-1003', name: [{ family: 'Nguyen', given: ['Casey'] }], birthDate: '1990-01-01',\n    telecom: [{ system: 'email', value: 'casey.n@example.com' }] }\n];\nconst r = $('Parse & Validate Referral').item.json.referral;\nconst hits = DB.filter(p => p.name[0].family.toLowerCase() === (r.familyName || '').toLowerCase() && p.birthDate === r.dateOfBirth);\nreturn { json: { resourceType: 'Bundle', type: 'searchset', total: hits.length, entry: hits.map(resource => ({ resource })) } };"
+      },
+      "id": "a3f277f8-b53b-4fd3-8ac1-e7aec23bb0bb",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "notesInFlow": true,
+      "name": "Halaxy: Search Patient (surname + DOB)",
+      "position": [
+        3904,
+        4768
+      ],
+      "onError": "continueErrorOutput",
+      "notes": "DEMO – sample Halaxy data (swap back to the live HTTP node when you have a Halaxy API key)"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Score candidates. Only a single, strong match is auto-linked; anything else goes to staff.\nconst ref = $('Parse & Validate Referral').item.json;\nconst r = ref.referral;\nconst patients = ($json.entry || []).map(e => e.resource).filter(p => p && p.resourceType === 'Patient');\nconst norm = s => (s || '').toString().trim().toLowerCase();\nconst digits = s => (s || '').replace(/\\D/g, '').replace(/^61/, '0');\n\nconst scored = patients.map(p => {\n  const given = (p.name || []).flatMap(n => n.given || []).map(norm);\n  const telecom = p.telecom || [];\n  const phones = telecom.filter(t => ['phone', 'sms'].includes(t.system)).map(t => digits(t.value));\n  const emails = telecom.filter(t => t.system === 'email').map(t => norm(t.value));\n  let score = 0; const reasons = [];\n  if (p.birthDate === r.dateOfBirth) { score += 2; reasons.push('DOB'); }\n  if (given.includes(norm(r.givenName))) { score += 2; reasons.push('given name'); }\n  else if (given.some(g => g[0] === norm(r.givenName)[0])) { score += 1; reasons.push('initial only'); }\n  if (r.phone && phones.includes(digits(r.phone))) { score += 2; reasons.push('mobile'); }\n  if (r.email && emails.includes(norm(r.email))) { score += 2; reasons.push('email'); }\n  return { id: p.id, score, reasons: reasons.join(' + ') };\n}).sort((a, b) => b.score - a.score);\n\nconst strong = scored.filter(s => s.score >= 4);\nlet matchStatus, patientId = null, exceptionReason = null;\nif (patients.length === 0) {\n  matchStatus = 'new';\n} else if (strong.length === 1) {\n  matchStatus = 'existing'; patientId = strong[0].id;\n} else if (strong.length > 1) {\n  matchStatus = 'ambiguous';\n  exceptionReason = `Possible duplicate client records in Halaxy (${strong.length} strong matches) – link manually`;\n} else {\n  matchStatus = 'ambiguous';\n  exceptionReason = 'A client with the same surname and DOB exists but name/contact differ – confirm before creating a new record';\n}\nreturn { json: { ...ref, matchStatus, patientId, matchCandidates: scored.slice(0, 3), exceptionReason } };"
+      },
+      "id": "25c88252-e200-46c0-a226-67de3048a691",
+      "name": "Match Existing Client",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4128,
+        4768
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "0f150b8e-e342-4054-9544-64fab726ad07",
+              "leftValue": "={{ $json.matchStatus === 'ambiguous' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f65dcc1f-3a2e-4c4d-b5fc-f6b252389694",
+      "name": "Needs Staff Review?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        4352,
+        4768
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "d82ab6f8-0185-42d3-86e0-b3a3977a7361",
+              "leftValue": "={{ $json.matchStatus === 'new' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8dcbb380-d411-4ae7-8efc-793a8fbaade1",
+      "name": "New Client?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        4576,
+        4640
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return { json: { resourceType: 'Patient', id: 'demo-new-' + Math.floor(Math.random() * 90000 + 10000) } };"
+      },
+      "id": "5d746dd5-8031-45f6-991e-a0cfe232b9f0",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "notesInFlow": true,
+      "name": "Halaxy: Create Patient",
+      "position": [
+        4784,
+        4528
+      ],
+      "onError": "continueErrorOutput",
+      "notes": "DEMO – sample Halaxy data (swap back to the live HTTP node when you have a Halaxy API key)"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const m = $('Match Existing Client').item.json;\nreturn { json: { ...m, patientId: $json.id, matchStatus: 'created' } };"
+      },
+      "id": "7216efbe-3958-4b6f-b139-5f67cfbc5b3c",
+      "name": "Capture New Patient ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5008,
+        4528
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return { json: { resourceType: 'Referral', id: 'demo-ref-' + Math.floor(Math.random() * 90000 + 10000), subjectReference: 'Patient/' + $json.patientId } };"
+      },
+      "id": "86d875f7-46ca-45c3-88a3-1faae6671192",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "notesInFlow": true,
+      "name": "Halaxy: Create Referral",
+      "position": [
+        5232,
+        4640
+      ],
+      "onError": "continueErrorOutput",
+      "notes": "DEMO – sample Halaxy data (swap back to the live HTTP node when you have a Halaxy API key)"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const src = (() => { try { return $('Capture New Patient ID').item.json; } catch (e) { return $('Match Existing Client').item.json; } })();\nconst r = src.referral;\nreturn { json: {\n  loggedAt: new Date().toISOString(),\n  outcome: src.matchStatus === 'created' ? 'NEW CLIENT + REFERRAL' : 'REFERRAL ADDED TO EXISTING CLIENT',\n  messageId: src.messageId,\n  internetMessageId: src.internetMessageId,\n  halaxyPatientId: src.patientId,\n  clientInitials: (r.givenName || '?')[0] + (r.familyName || '?')[0],\n  service: r.serviceRequested,\n  funding: r.fundingType,\n  referrerPractice: r.referrerPractice || '',\n  aiConfidence: src.aiConfidence,\n  warnings: (src.warnings || []).join('; '),\n  exceptionReason: ''\n} };"
+      },
+      "id": "ddde7a60-87b6-4460-99f9-a45092e6287c",
+      "name": "Build Audit Row (success)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5456,
+        4640
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "worksheet",
+        "operation": "append",
+        "workbook": {
+          "__rl": true,
+          "value": "={{ \"__EXCEL_WORKBOOK_ID__\" }}",
+          "mode": "id"
+        },
+        "worksheet": {
+          "__rl": true,
+          "value": "{00000000-0001-0000-0000-000000000000}",
+          "mode": "list",
+          "cachedResultName": "Referral Audit"
+        },
+        "dataMode": "autoMap",
+        "options": {}
+      },
+      "id": "0e651e1d-8b5b-4844-ad61-96826fb0086f",
+      "name": "Log to Audit Sheet (success)",
+      "type": "n8n-nodes-base.microsoftExcel",
+      "typeVersion": 2.1,
+      "position": [
+        5664,
+        4640
+      ],
+      "credentials": {
+        "microsoftExcelOAuth2Api": {
+          "name": "Allied Health Automation Suite"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "messageId": {
+          "__rl": true,
+          "value": "={{ $('Build Audit Row (success)').item.json.messageId }}",
+          "mode": "id"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "__OUTLOOK_PROCESSED_FOLDER_ID__",
+          "mode": "id",
+          "cachedResultName": "Processed"
+        }
+      },
+      "id": "5d181f97-eb2b-48e8-8019-a95f2d282b73",
+      "name": "Move Email to 'Processed'",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        5888,
+        4640
+      ],
+      "notesInFlow": true,
+      "webhookId": "a889ac65-5333-425a-ba54-9468e442aac7",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "name": "Microsoft Outlook account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Sample emails don't exist in your mailbox, so this step is allowed to fail in demo runs"
+    },
+    {
+      "parameters": {
+        "toRecipients": "={{ $('Parse & Validate Referral').item.json.fromAddress }}",
+        "subject": "Referral received – thank you",
+        "bodyContent": "<p>Thank you – we have received your referral and our intake team will contact the client within two business days.</p><p>This is an automated acknowledgement and does not contain client information.</p>",
+        "additionalFields": {
+          "bodyContentType": "html"
+        }
+      },
+      "id": "3b63e360-af26-4dd6-a80f-1812bfbfb758",
+      "name": "Acknowledge Referrer (enable after testing)",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        6112,
+        4640
+      ],
+      "webhookId": "59399192-12e3-45e4-a786-5c76fefb4fc2",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "name": "Microsoft Outlook account"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// One place that turns any problem into a clear, low-PHI review task.\nconst safe = n => { try { return $(n).item.json; } catch (e) { return null; } };\nconst base = safe('Capture New Patient ID') || safe('Match Existing Client') || safe('Parse & Validate Referral')\n  || safe('Pre-process & Tokenise Identifiers') || {};\nconst r = base.referral || {};\nlet reason = $json.exceptionReason || base.exceptionReason;\nif ($json.error) {\n  const msg = typeof $json.error === 'string' ? $json.error : ($json.error.message || JSON.stringify($json.error));\n  const afterPatient = base.patientId ? ` Client is in Halaxy (ID ${base.patientId}) – attach the referral manually.` : '';\n  reason = 'Automation error: ' + String(msg).slice(0, 200) + '.' + afterPatient;\n}\nreason = reason || 'Unknown – please review';\nconst urgent = base.status === 'urgent';\nconst initials = (r.givenName ? r.givenName[0] : '?') + (r.familyName ? r.familyName[0] : '?');\nconst list = a => (a && a.length ? '<ul>' + a.map(x => `<li>${x}</li>`).join('') + '</ul>' : '<p>–</p>');\nconst html = `\n  <h3 style=\"color:${urgent ? '#b00020' : '#333'}\">${urgent ? 'URGENT – ' : ''}Referral needs review</h3>\n  <p><b>Reason:</b> ${reason}</p>\n  <p><b>Client initials:</b> ${initials} &nbsp; <b>Service:</b> ${r.serviceRequested || '–'} &nbsp; <b>Funding:</b> ${r.fundingType || '–'}</p>\n  <p><b>Referrer:</b> ${r.referrerName || base.fromName || '–'} ${r.referrerPractice ? '(' + r.referrerPractice + ')' : ''}</p>\n  <p><b>Missing:</b></p>${list(base.missing)}\n  <p><b>Warnings:</b></p>${list(base.warnings)}\n  <p><b>Possible Halaxy matches:</b></p>${list((base.matchCandidates || []).map(c => `ID ${c.id} – score ${c.score} (${c.reasons})`))}\n  <p>The original email (subject: \"${base.subject || ''}\", received ${base.receivedAt || ''}) has been moved to the <b>Needs Review</b> folder.</p>`;\nreturn { json: {\n  messageId: base.messageId, urgent, subject: `${urgent ? '[URGENT] ' : ''}[Referral review] ${initials} – ${reason.slice(0, 70)}`,\n  html,\n  audit: { loggedAt: new Date().toISOString(), outcome: urgent ? 'URGENT REVIEW' : 'STAFF REVIEW', messageId: base.messageId,\n    internetMessageId: base.internetMessageId, halaxyPatientId: base.patientId || '', clientInitials: initials,\n    service: r.serviceRequested || '', funding: r.fundingType || '', referrerPractice: r.referrerPractice || '',\n    aiConfidence: base.aiConfidence ?? '', warnings: (base.warnings || []).join('; '), exceptionReason: reason }\n} };"
+      },
+      "id": "08c8c431-6b0a-47d8-a11d-0c516da10615",
+      "name": "Build Exception for Staff",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4576,
+        5120
+      ]
+    },
+    {
+      "parameters": {
+        "toRecipients": "={{ $('Config [01]').first().json.intakeMailbox }}",
+        "subject": "={{ $json.subject }}",
+        "bodyContent": "={{ $json.html }}",
+        "additionalFields": {
+          "importance": "={{ $json.urgent ? 'High' : 'Normal' }}",
+          "bodyContentType": "html"
+        }
+      },
+      "id": "b49e9d5c-5987-4be6-9726-c1ffb87d6768",
+      "name": "Email Staff Review Queue",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        4784,
+        5120
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "webhookId": "d5b88a16-3888-4252-a0b1-5ecfdef8594b",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "name": "Microsoft Outlook account"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return { json: $('Build Exception for Staff').item.json.audit };"
+      },
+      "id": "cb7077bf-5e10-479b-a38e-909be5d31cd2",
+      "name": "Shape Exception Audit Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5008,
+        5120
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "worksheet",
+        "operation": "append",
+        "workbook": {
+          "__rl": true,
+          "value": "={{ \"__EXCEL_WORKBOOK_ID__\" }}",
+          "mode": "id"
+        },
+        "worksheet": {
+          "__rl": true,
+          "value": "{00000000-0001-0000-0000-000000000000}",
+          "mode": "list",
+          "cachedResultName": "Referral Audit"
+        },
+        "dataMode": "autoMap",
+        "options": {}
+      },
+      "id": "6078acd8-1d61-469a-b543-c5c8867a10fd",
+      "name": "Log to Audit Sheet (exception)",
+      "type": "n8n-nodes-base.microsoftExcel",
+      "typeVersion": 2.1,
+      "position": [
+        5232,
+        5120
+      ],
+      "credentials": {
+        "microsoftExcelOAuth2Api": {
+          "name": "Allied Health Automation Suite"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "messageId": {
+          "__rl": true,
+          "value": "={{ $('Build Exception for Staff').item.json.messageId }}",
+          "mode": "id"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "__OUTLOOK_NEEDS_REVIEW_FOLDER_ID__",
+          "mode": "id",
+          "cachedResultName": "Needs Review"
+        }
+      },
+      "id": "fc20afb2-91e8-4f32-9bae-979b257ef9b7",
+      "name": "Move Email to 'Needs Review'",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        5456,
+        5120
+      ],
+      "notesInFlow": true,
+      "webhookId": "e22c2fd7-a0e2-451b-8a3a-447022a39805",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "name": "Microsoft Outlook account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Sample emails don't exist in your mailbox, so this step is allowed to fail in demo runs"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Five fictional referral emails, shaped like Outlook (Microsoft Graph) messages.\nconst run = Date.now();\nconst mk = (n, subject, html, fromName, fromAddr, attach = false) => ({ json: {\n  id: `demo-msg-${run}-${n}`, internetMessageId: `<demo-${run}-${n}@example.com>`, subject,\n  body: { contentType: 'html', content: html }, from: { emailAddress: { name: fromName, address: fromAddr } },\n  receivedDateTime: new Date().toISOString(), hasAttachments: attach } });\nreturn [\n  mk(1, 'Referral – Exercise Physiology – Jordan Pike',\n    '<p>Dear team, please see Jordan Pike (DOB 14/03/1968) for exercise physiology under a GP Chronic Condition Management Plan. Type 2 diabetes, needs a supervised strength program.</p><p>Mobile 0412 345 678, email jordan.pike.test@example.com. Medicare 2123 45670 1.</p><p>Referral date 02/10/2026.<br>Dr Alex Moran, Kingaroy Family Practice, Provider No. 123456AB</p>',\n    'Dr Alex Moran', 'alex.moran@example.com', true),\n  mk(2, 'OT referral – Morgan Ellis',\n    '<p>Hi, referring Morgan Ellis, DOB 02/06/1985, for occupational therapy (NDIS plan managed) – home modifications assessment.</p><p>Mobile 0400 111 222.</p><p>Kind regards,<br>Jess Carter, Support Coordinator, Burnett Support Services</p>',\n    'Jess Carter', 'jess.carter@example.com'),\n  mk(3, 'Psychology referral – Casey Nguyen',\n    '<p>Please see Casey Nguyen (DOB 01/01/1990) for psychology under a Mental Health Treatment Plan, 6 sessions. Mild anxiety.</p><p>Contact: 0400 555 666.</p><p>Dr Priya Shah, Nanango Medical Centre</p>',\n    'Dr Priya Shah', 'priya.shah@example.com'),\n  mk(4, 'New referral',\n    '<p>Hi, referring Sam for OT, NDIS funded. Thanks, Kim (support coordinator)</p>',\n    'Kim', 'kim@example.com'),\n  mk(5, 'Psychology referral – urgent',\n    '<p>Please see Taylor Reed (DOB 21/07/1999) for psychology under a Mental Health Treatment Plan. Has disclosed recent thoughts of self-harm; please contact today.</p><p>Mobile 0498 765 432.</p><p>Dr Chris Lane, Nanango Medical Centre</p>',\n    'Dr Chris Lane', 'chris.lane@example.com')\n];"
+      },
+      "id": "70d316bd-0486-4d40-9d63-427f58e62368",
+      "name": "Sample Referral Emails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1840,
+        5152
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## DEMO MODE – start here\nClick the **Execute workflow** dropdown and choose **Demo: Run With Sample Referrals**. It feeds in 5 fictional referrals:\n1 new client · 2 existing client · 3 possible duplicate · 4 incomplete · 5 risk → urgent.\nHalaxy steps use sample data. Groq, Outlook and Excel run for real.",
+        "height": 230,
+        "width": 560,
+        "color": 2
+      },
+      "id": "6ef7b7ff-e207-4fac-b95b-ecb9d5cc4e4a",
+      "name": "Demo Banner [01]",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1664,
+        5312
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 02 · Halaxy invoices → Xero (draft)\n**Halaxy** FHIR API (OAuth2 client-credentials, 15-min token) → **Xero** Accounting API (OAuth2; organisation found automatically via `/connections`) → **Excel** sync log → **Outlook** alerts.\n\n**Duplicates** – checked against the *destination*: every invoice gets a stable `HLX-<number>` reference; we look it up in Xero before creating, and also send an `Idempotency-Key`. Failed items are simply picked up again next run (2-hour look-back window overlaps the hourly schedule).\n\n**Errors** – retries with back-off on every API call, Xero calls throttled to stay under 60/min, failures routed to a finance alert, unhandled errors caught by Workflow 99.\n\n**Human approval** – invoices land in Xero as **DRAFT** for finance to approve. Line descriptions are generic – no clinical detail leaves Halaxy.",
+        "height": 470,
+        "width": 640,
+        "color": 4
+      },
+      "id": "dad4552f-ea95-42b3-b17c-0b11af71c65a",
+      "name": "Sticky Note 1 [02]",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1664,
+        5824
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7-19 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "3b71a382-f0d2-4673-942d-0ae706ae7eaa",
+      "name": "Every Hour (business days)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        1728,
+        6384
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ffea71b5-7b1e-4bd3-8fba-3f304cd2150c",
+              "name": "halaxyBaseUrl",
+              "value": "https://au-api.halaxy.com/main",
+              "type": "string"
+            },
+            {
+              "id": "faaf3dba-6706-469f-8358-80c54069f4eb",
+              "name": "halaxyUserAgent",
+              "value": "AlliedHealth-Automation (__YOUR_EMAIL__)",
+              "type": "string"
+            },
+            {
+              "id": "cef02adb-55ba-4b6a-ad3c-ca51c95d4006",
+              "name": "xeroOrgName",
+              "value": "Demo Company",
+              "type": "string"
+            },
+            {
+              "id": "835f8b5c-573e-4947-ba3f-1a87133f8215",
+              "name": "xeroAccountCode",
+              "value": "200",
+              "type": "string"
+            },
+            {
+              "id": "6da00967-830b-458f-98af-60a37ed38c8f",
+              "name": "xeroTaxType",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "341772e0-09b6-496d-a0ca-c4ef7a4b3fcf",
+              "name": "xeroInvoiceStatus",
+              "value": "DRAFT",
+              "type": "string"
+            },
+            {
+              "id": "5e996de0-c0a1-4e90-9cfe-4d250806d316",
+              "name": "financeMailbox",
+              "value": "__YOUR_EMAIL__",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "460403df-5c69-45d2-b378-0722fc4dd054",
+      "name": "Config [02]",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1952,
+        6384
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.xero.com/connections",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "id": "7467a3b3-27f2-466e-a8ea-001ff605b737",
+      "name": "Xero: Get Connected Organisations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1952,
+        6160
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "oAuth2Api": {
+          "name": "Xero"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Finds the Xero organisation automatically - no tenant ID to copy/paste.\nconst want = ($('Config [02]').first().json.xeroOrgName || '').toLowerCase();\nconst orgs = $input.all().map(i => i.json).filter(o => o.tenantId);\nif (!orgs.length) throw new Error('No Xero organisation is connected to this credential');\nconst org = orgs.find(o => want && (o.tenantName || '').toLowerCase().includes(want)) || orgs[0];\nreturn [{ json: { tenantId: org.tenantId, tenantName: org.tenantName } }];"
+      },
+      "id": "10959f15-549b-4d9d-bea3-2d5bd7a54a8e",
+      "name": "Pick Xero Organisation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2176,
+        6160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { token_type: 'Bearer', access_token: 'demo-token', expires_in: 900 } }];"
+      },
+      "id": "b3fd20f6-cb95-4677-b319-94d3aa3cb62a",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "notesInFlow": true,
+      "name": "Halaxy: Get Token [02]",
+      "position": [
+        2384,
+        6160
+      ],
+      "onError": "continueErrorOutput",
+      "notes": "DEMO – sample Halaxy data (swap back to the live HTTP node when you have a Halaxy API key)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Sample Halaxy invoices (fictional). Same references every run, so the 2nd run shows duplicate protection.\nconst inv = (id, num, date, total, payer, status = 'issued') => ({ resource: { resourceType: 'Invoice', id, status,\n  identifier: [{ value: num }], date, recipient: { display: payer }, totalGross: { value: total, currency: 'AUD' } } });\nreturn [{ json: { resourceType: 'Bundle', type: 'searchset', entry: [\n  inv('demo-inv-1', 'INV-1001', '2026-10-20', 165.00, 'Jordan Pike'),\n  inv('demo-inv-2', 'INV-1002', '2026-10-20', 193.99, 'Burnett Plan Management (demo)'),\n  inv('demo-inv-3', 'INV-1003', '2026-10-21', 120.00, 'Riley Morgan'),\n  inv('demo-inv-4', 'INV-1004', '2026-10-21', 88.00, 'Riley Morgan', 'cancelled')\n] } }];"
+      },
+      "id": "7bd41fa2-c23b-497c-8541-19a739d50c62",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "notesInFlow": true,
+      "name": "Halaxy: Recently Updated Invoices",
+      "position": [
+        2384,
+        6384
+      ],
+      "onError": "continueErrorOutput",
+      "notes": "DEMO – sample Halaxy data (swap back to the live HTTP node when you have a Halaxy API key)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// FHIR Bundle -> one item per invoice, with only what Xero needs.\nconst bundle = $input.first().json;\nconst invoices = (bundle.entry || []).map(e => e.resource).filter(r => r && r.resourceType === 'Invoice');\nconst out = [];\nfor (const inv of invoices) {\n  if (['cancelled', 'entered-in-error', 'draft'].includes(inv.status)) continue;\n  const total = (inv.totalGross && inv.totalGross.value) ?? (inv.totalNet && inv.totalNet.value) ?? 0;\n  if (!total) continue;\n  const number = (inv.identifier && inv.identifier[0] && inv.identifier[0].value) || inv.id;\n  out.push({ json: {\n    halaxyInvoiceId: inv.id,\n    reference: 'HLX-' + number,\n    invoiceDate: (inv.date || new Date().toISOString()).slice(0, 10),\n    total,\n    payerName: ((inv.recipient && inv.recipient.display) || 'Unknown payer').replace(/\"/g, '').trim(),\n    halaxyStatus: inv.status\n  }, pairedItem: { item: 0 } });\n}\nreturn out;"
+      },
+      "id": "354b14ed-99e0-4a2c-a582-310af93e8e26",
+      "name": "Flatten & Map Invoices",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2608,
+        6384
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.xero.com/api.xro/2.0/Contacts",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "where",
+              "value": "={{ 'Name==\"' + $json.payerName + '\"' }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "xero-tenant-id",
+              "value": "={{ $('Pick Xero Organisation').first().json.tenantId }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1100
+            }
+          }
+        }
+      },
+      "id": "6eb36c5f-c94c-4499-abcb-3c1cdd83bd9a",
+      "name": "Xero: Find Contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2832,
+        6384
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "oAuth2Api": {
+          "name": "Xero"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const inv = $('Flatten & Map Invoices').item.json;\nconst c = ($json.Contacts || [])[0];\nreturn { json: { ...inv, contactId: c ? c.ContactID : null } };"
+      },
+      "id": "43a2215a-d192-4772-9375-01617de50b54",
+      "name": "Resolve Contact",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3056,
+        6384
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "a12ca1f5-b6b4-41f2-92df-99090af760e3",
+              "leftValue": "={{ !!$json.contactId }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f97bcdec-80e4-4a76-8566-384b8daef47e",
+      "name": "Contact Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3264,
+        6384
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.xero.com/api.xro/2.0/Contacts",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "xero-tenant-id",
+              "value": "={{ $('Pick Xero Organisation').first().json.tenantId }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "Idempotency-Key",
+              "value": "={{ 'contact-' + $json.payerName }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ Contacts: [{ Name: $json.payerName }] }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1100
+            }
+          }
+        }
+      },
+      "id": "c0e1a63f-eb29-4c0c-bf91-678718ac7682",
+      "name": "Xero: Create Contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3488,
+        6544
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "oAuth2Api": {
+          "name": "Xero"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return { json: { ...$('Resolve Contact').item.json, contactId: $json.Contacts[0].ContactID } };"
+      },
+      "id": "7007d4a5-d6ed-4159-8625-ceaf8e02a24e",
+      "name": "Capture Contact ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3712,
+        6544
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.xero.com/api.xro/2.0/Invoices",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "where",
+              "value": "={{ 'Reference==\"' + $json.reference + '\"' }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "xero-tenant-id",
+              "value": "={{ $('Pick Xero Organisation').first().json.tenantId }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1100
+            }
+          }
+        }
+      },
+      "id": "b0eeae1a-5c6a-435f-8f51-a8ec1670beff",
+      "name": "Xero: Check Invoice Exists",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3936,
+        6384
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "oAuth2Api": {
+          "name": "Xero"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const safe = n => { try { return $(n).item.json; } catch (e) { return null; } };\nconst inv = safe('Capture Contact ID') || $('Resolve Contact').item.json;\nconst existing = ($json.Invoices || []).filter(i => i.Status !== 'VOIDED' && i.Status !== 'DELETED');\nreturn { json: { ...inv, alreadyInXero: existing.length > 0, existingXeroInvoiceId: existing[0] ? existing[0].InvoiceID : null,\n  amountMismatch: existing[0] ? Math.abs(existing[0].Total - inv.total) > 0.009 : false } };"
+      },
+      "id": "9f0b3cc9-7dca-4b8a-9e27-3fe0b3fa0e69",
+      "name": "Flag Duplicates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4144,
+        6384
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "7c929a7e-53e0-4208-96af-669a60618e66",
+              "leftValue": "={{ $json.alreadyInXero }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ff2ad29c-defd-40b8-95a8-df594c448380",
+      "name": "Already in Xero?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        4368,
+        6384
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.xero.com/api.xro/2.0/Invoices",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "xero-tenant-id",
+              "value": "={{ $('Pick Xero Organisation').first().json.tenantId }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "Idempotency-Key",
+              "value": "={{ $json.reference }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ Invoices: [{ Type: 'ACCREC', Contact: { ContactID: $json.contactId }, Date: $json.invoiceDate, DueDate: $json.invoiceDate, Reference: $json.reference, Status: $('Config [02]').first().json.xeroInvoiceStatus, LineAmountTypes: 'Inclusive', LineItems: [{ Description: 'Allied health services – Halaxy ' + $json.reference, Quantity: 1, UnitAmount: $json.total, AccountCode: $('Config [02]').first().json.xeroAccountCode, ...($('Config [02]').first().json.xeroTaxType ? { TaxType: $('Config [02]').first().json.xeroTaxType } : {}) }] }] }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1100
+            }
+          }
+        }
+      },
+      "id": "45c327ad-3dd4-48d0-8990-f33ad1fff8d1",
+      "name": "Xero: Create Draft Invoice",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4592,
+        6512
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "oAuth2Api": {
+          "name": "Xero"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const inv = $('Flag Duplicates').item.json;\nreturn { json: { loggedAt: new Date().toISOString(), reference: inv.reference, halaxyInvoiceId: inv.halaxyInvoiceId,\n  xeroInvoiceId: $json.Invoices[0].InvoiceID, total: inv.total, result: 'CREATED (DRAFT)', note: '' } };"
+      },
+      "id": "a7ccc313-d6db-4b1a-a297-3de4aadb3b1e",
+      "name": "Log Row: Created",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4816,
+        6512
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return { json: { loggedAt: new Date().toISOString(), reference: $json.reference, halaxyInvoiceId: $json.halaxyInvoiceId,\n  xeroInvoiceId: $json.existingXeroInvoiceId, total: $json.total, result: 'SKIPPED – ALREADY IN XERO',\n  note: $json.amountMismatch ? 'AMOUNT DIFFERS FROM XERO – CHECK' : '' } };"
+      },
+      "id": "16d68839-f7d2-4150-9e57-571d2fa91f12",
+      "name": "Log Row: Skipped Duplicate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4592,
+        6272
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const safe = n => { try { return $(n).item.json; } catch (e) { return null; } };\nconst inv = safe('Flag Duplicates') || safe('Resolve Contact') || safe('Flatten & Map Invoices') || {};\nconst err = typeof $json.error === 'string' ? $json.error : ($json.error && $json.error.message) || 'Unknown error';\nreturn { json: { subject: `[Xero sync] Failed: ${inv.reference || 'invoice fetch'}`,\n  html: `<p>The Halaxy → Xero sync could not complete for <b>${inv.reference || 'the invoice batch'}</b>.</p>\n         <p><b>Error:</b> ${String(err).slice(0, 300)}</p>\n         <p>It will be retried automatically on the next hourly run. If this repeats, check the Xero connection / tenant ID.</p>` } };"
+      },
+      "id": "542d17f8-b5f6-4edb-b16c-00bf0e3977b2",
+      "name": "Format Sync Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3712,
+        6832
+      ]
+    },
+    {
+      "parameters": {
+        "toRecipients": "={{ $('Config [02]').first().json.financeMailbox }}",
+        "subject": "={{ $json.subject }}",
+        "bodyContent": "={{ $json.html }}",
+        "additionalFields": {
+          "bodyContentType": "html"
+        }
+      },
+      "id": "27d47928-c8d8-4c92-aa0d-5b98ef60828c",
+      "name": "Alert Finance",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        3936,
+        6832
+      ],
+      "webhookId": "80753c16-ef0d-4226-9c5b-826528d2cb46",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "name": "Microsoft Outlook account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## DEMO MODE\nHalaxy steps return **4 sample invoices** (1 cancelled → skipped). Xero runs for real and creates **DRAFT** invoices in your Demo Company.\nRun it twice: the 2nd run should log **SKIPPED – ALREADY IN XERO** (duplicate protection).",
+        "height": 220,
+        "width": 560,
+        "color": 2
+      },
+      "id": "de42e401-3630-4e39-ad26-c1bb905e9867",
+      "name": "Demo Banner [02]",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2432,
+        5824
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 03 · Fill cancelled appointments – AI drafts, a human approves\n4:30pm AEST, Mon–Fri.\n\n1. Halaxy: appointments cancelled today → drop anyone who has already rebooked.\n2. **Data minimisation**: The LLM receives only first name, service type and practitioner first name. No diagnosis, cancellation reason, DOB or contact details.\n3. The LLM drafts a short, warm, no-pressure message (rules in the prompt + length check in code).\n4. **Human approval gate**: the practice manager gets one email with every draft and a form link (a form, not a plain link, so email link-scanners can't auto-approve). They can approve all, exclude specific clients, or reject. No reply within 18h = nothing is sent.\n5. Only approved messages go out; everything is logged.",
+        "height": 470,
+        "width": 640,
+        "color": 4
+      },
+      "id": "da3b40b6-616c-4415-9c03-1affe5b207e0",
+      "name": "Sticky Note 1 [03]",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1664,
+        7328
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 16 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "e957ce6d-0c77-4813-8433-82371abd99b5",
+      "name": "Weekdays 4:30pm",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        1728,
+        7888
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "503f92b5-60b6-456d-9150-69a433e8928a",
+              "name": "halaxyBaseUrl",
+              "value": "https://au-api.halaxy.com/main",
+              "type": "string"
+            },
+            {
+              "id": "8a1db031-c048-4ded-a0ab-ee8102a14356",
+              "name": "halaxyUserAgent",
+              "value": "AlliedHealth-Automation (__YOUR_EMAIL__)",
+              "type": "string"
+            },
+            {
+              "id": "71b48737-2cb5-465d-97a8-3ce117575d47",
+              "name": "aiModel",
+              "value": "openai/gpt-oss-120b",
+              "type": "string"
+            },
+            {
+              "id": "dcce3ddc-c023-4db8-8d02-15d50d8f3168",
+              "name": "approverMailbox",
+              "value": "__YOUR_EMAIL__",
+              "type": "string"
+            },
+            {
+              "id": "1fb4c947-2ea0-4de0-9261-acdb93c3cc92",
+              "name": "practiceName",
+              "value": "Your Practice Name",
+              "type": "string"
+            },
+            {
+              "id": "235fcdf4-33eb-4da8-a635-541dbefbe4e8",
+              "name": "bookingPhone",
+              "value": "07 0000 0000",
+              "type": "string"
+            },
+            {
+              "id": "977bba71-bf7b-4f2a-a507-b368b35aa54a",
+              "name": "demoClientEmail",
+              "value": "__YOUR_EMAIL__",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "8d543897-a113-48bc-9abe-5599854baded",
+      "name": "Config [03]",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1952,
+        7888
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { token_type: 'Bearer', access_token: 'demo-token', expires_in: 900 } }];"
+      },
+      "id": "1e233100-5241-4d6f-9b75-e5c412a295d7",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "notesInFlow": true,
+      "name": "Halaxy: Get Token [03]",
+      "position": [
+        2176,
+        7888
+      ],
+      "onError": "continueErrorOutput",
+      "notes": "DEMO – sample Halaxy data (swap back to the live HTTP node when you have a Halaxy API key)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Three fictional appointments cancelled today.\nconst appt = (id, pid, pname, prac, service) => ({ resource: { resourceType: 'Appointment', id, status: 'cancelled',\n  start: new Date().toISOString(), serviceType: [{ text: service }],\n  participant: [{ actor: { reference: 'Patient/' + pid, display: pname } }, { actor: { reference: 'Practitioner/' + id, display: prac } }] } });\nreturn [{ json: { resourceType: 'Bundle', entry: [\n  appt('demo-a1', 'demo-2001', 'Riley Morgan', 'Hannah Lee', 'Exercise Physiology'),\n  appt('demo-a2', 'demo-2002', 'Avery Brooks', 'Tom Walsh', 'Psychology'),\n  appt('demo-a3', 'demo-2003', 'Jamie Collins', 'Hannah Lee', 'Occupational Therapy')\n] } }];"
+      },
+      "id": "586c7454-bd95-42bd-a2ef-a74ef978340c",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "notesInFlow": true,
+      "name": "Halaxy: Cancelled Today",
+      "position": [
+        2384,
+        7888
+      ],
+      "notes": "DEMO – sample Halaxy data (swap back to the live HTTP node when you have a Halaxy API key)"
+    },
+    {
+      "parameters": {
+        "jsCode": "const appts = ($input.first().json.entry || []).map(e => e.resource).filter(a => a && a.resourceType === 'Appointment');\nconst seen = new Set(); const out = [];\nfor (const a of appts) {\n  const parts = a.participant || [];\n  const pat = parts.find(p => p.actor && /Patient\\//.test(p.actor.reference || ''));\n  if (!pat) continue;                                   // internal blockers / meetings\n  const patientId = pat.actor.reference.split('Patient/')[1];\n  if (seen.has(patientId)) continue; seen.add(patientId);\n  const prac = parts.find(p => p.actor && /Practitioner/.test(p.actor.reference || ''));\n  out.push({ json: {\n    patientId,\n    service: (a.serviceType && a.serviceType[0] && (a.serviceType[0].text || (a.serviceType[0].coding || [])[0]?.display)) || a.description || 'appointment',\n    practitionerFirstName: prac && prac.actor.display ? prac.actor.display.split(' ')[0] : null,\n    cancelledApptStart: a.start\n  }, pairedItem: { item: 0 } });\n}\nreturn out;"
+      },
+      "id": "523993bc-acf3-48fa-bf39-055920dfd203",
+      "name": "List Cancelled Clients",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2608,
+        7888
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Avery Brooks has already rebooked, so they are skipped.\nconst rebooked = ['demo-2002'];\nconst pid = $json.patientId;\nreturn { json: { resourceType: 'Bundle', entry: rebooked.includes(pid) ? [{ resource: { resourceType: 'Appointment', status: 'booked' } }] : [] } };"
+      },
+      "id": "f6474e0f-f31b-4b75-b3ca-a3f6d4e0d89f",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "notesInFlow": true,
+      "name": "Halaxy: Future Bookings",
+      "position": [
+        2832,
+        7888
+      ],
+      "notes": "DEMO – sample Halaxy data (swap back to the live HTTP node when you have a Halaxy API key)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "39284588-72fc-49b2-81e3-71cc911b15ff",
+              "leftValue": "={{ ($json.entry || []).length === 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "533493b0-881c-4edc-902c-6e73b9264faf",
+      "name": "Not Yet Rebooked?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3056,
+        7888
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Sample client records. Emails go to YOUR address (Config → demoClientEmail) so you can see them arrive.\nconst pid = $('List Cancelled Clients').item.json.patientId;\nconst names = { 'demo-2001': ['Riley', 'Morgan'], 'demo-2002': ['Avery', 'Brooks'], 'demo-2003': ['Jamie', 'Collins'] };\nconst [given, family] = names[pid] || ['Client', 'Demo'];\nreturn { json: { resourceType: 'Patient', id: pid, name: [{ given: [given], family }],\n  telecom: [{ system: 'email', value: $('Config [03]').first().json.demoClientEmail }, { system: 'sms', value: '0400 000 000' }] } };"
+      },
+      "id": "42b42e54-fe5d-4155-823f-95bfa4bd5e8f",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "notesInFlow": true,
+      "name": "Halaxy: Get Patient",
+      "position": [
+        3264,
+        7792
+      ],
+      "notes": "DEMO – sample Halaxy data (swap back to the live HTTP node when you have a Halaxy API key)"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const c = $('List Cancelled Clients').item.json;\nconst p = $json;\nconst name = (p.name || [])[0] || {};\nconst telecom = p.telecom || [];\nconst email = (telecom.find(t => t.system === 'email') || {}).value || null;\nconst mobile = (telecom.find(t => ['sms', 'phone'].includes(t.system) && /^(\\+?61|0)4/.test((t.value || '').replace(/\\s/g, ''))) || {}).value || null;\nreturn { json: {\n  patientId: c.patientId,\n  firstName: (name.given || [])[0] || 'there',\n  contact: { email, mobile },                      // kept locally, never sent to the AI\n  aiInput: { firstName: (name.given || [])[0] || 'there', service: c.service, practitionerFirstName: c.practitionerFirstName }\n} };"
+      },
+      "id": "6f134c4d-3732-49b5-9cd2-3c7c4c9920b1",
+      "name": "Minimum Data for AI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3488,
+        7792
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $('Config [03]').first().json.aiModel, max_completion_tokens: 2048, reasoning_effort: 'low', response_format: { type: 'json_object' }, messages: [{ role: 'system', content: \"You write short re-engagement messages for an Australian community allied health practice whose clients cancelled an appointment today. Tone: warm, respectful, no pressure, plain Australian English. Rules: never mention or guess the reason for cancelling, any health condition or diagnosis; never give health advice; do not invent appointment times; invite them to reply or call to rebook when it suits them; SMS must be under 300 characters and end with 'Reply STOP to opt out'. Return ONLY JSON: {\\\"sms\\\": string, \\\"emailSubject\\\": string, \\\"emailBody\\\": string}.\" }, { role: 'user', content: JSON.stringify({ ...$json.aiInput, practiceName: $('Config [03]').first().json.practiceName, bookingPhone: $('Config [03]').first().json.bookingPhone }) }] }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 2500
+            }
+          }
+        }
+      },
+      "id": "8dad9658-f82e-4a59-ad89-91d9c5805225",
+      "name": "AI: Draft Messages (Groq)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3712,
+        7792
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Groq: Allied Health Automation Suite"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const c = $('Minimum Data for AI').item.json;\nlet d = null;\ntry { d = JSON.parse((($json.choices || [])[0]?.message?.content || '').replace(/```json|```/g, '').trim()); } catch (e) {}\nconst issues = [];\nif (!d) issues.push('AI draft unreadable');\nelse {\n  if ((d.sms || '').length > 300) issues.push('SMS too long');\n  if (/diagnos|depress|anxiety|pain|injur|condition/i.test((d.sms || '') + (d.emailBody || ''))) issues.push('Possible health detail in draft');\n}\nif (!c.contact.email && !c.contact.mobile) issues.push('No email or mobile on file');\nreturn { json: { patientId: c.patientId, firstName: c.firstName, contact: c.contact, draft: d, issues } };"
+      },
+      "id": "abea8618-1179-44a3-82e9-83181df458a6",
+      "name": "Check Drafts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3936,
+        7792
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const drafts = $input.all().map((i, n) => ({ no: n + 1, ...i.json }));\nconst mask = v => v ? v.replace(/^(.{3}).*(.{3})$/, '$1•••$2') : '–';\nconst rows = drafts.map(d => `<tr><td>${d.no}</td><td>${d.firstName}</td><td>${mask(d.contact.email)}<br>${mask(d.contact.mobile)}</td>\n  <td>${d.draft ? d.draft.sms : '–'}</td><td style=\"color:#b00020\">${d.issues.join('<br>')}</td></tr>`).join('');\nconst html = `<p>${drafts.length} client(s) cancelled today and haven't rebooked. Please review the drafts below.</p>\n  <table border=\"1\" cellpadding=\"6\" style=\"border-collapse:collapse\"><tr><th>#</th><th>Client</th><th>Contact</th><th>Draft SMS</th><th>Flags</th></tr>${rows}</table>\n  <p><b>Nothing is sent until you approve.</b> Drafts with flags are excluded automatically.</p>\n  <p><a href=\"${$execution.resumeFormUrl}\">Open the approval form</a> (approve all / exclude some / reject). No response within 18 hours = nothing sent.</p>`;\nreturn [{ json: { drafts, html, count: drafts.length } }];"
+      },
+      "id": "d997ec00-eb63-4d43-a16a-fe03cd315ce8",
+      "name": "Bundle for Approval",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4144,
+        7792
+      ]
+    },
+    {
+      "parameters": {
+        "toRecipients": "={{ $('Config [03]').first().json.approverMailbox }}",
+        "subject": "={{ '[Approval needed] ' + $json.count + ' re-engagement message(s) for today\\'s cancellations' }}",
+        "bodyContent": "={{ $json.html }}",
+        "additionalFields": {
+          "bodyContentType": "html"
+        }
+      },
+      "id": "8f9528f5-175c-45a7-936f-b4e1c7b1e303",
+      "name": "Email Approver",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        4368,
+        7792
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "webhookId": "09a23060-5b9e-41e0-a594-67b5866d5db5",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "name": "Microsoft Outlook account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resume": "form",
+        "formTitle": "Approve re-engagement messages",
+        "formDescription": "Review the drafts in the approval email, then choose an option.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Decision",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Approve all"
+                  },
+                  {
+                    "option": "Approve except excluded"
+                  },
+                  {
+                    "option": "Reject all"
+                  }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Exclude (row numbers, comma-separated)"
+            },
+            {
+              "fieldLabel": "Approved by",
+              "requiredField": true
+            }
+          ]
+        },
+        "limitWaitTime": true,
+        "resumeAmount": 18,
+        "options": {}
+      },
+      "id": "b1be5093-ed3f-454d-8b73-28b86637d49d",
+      "name": "Wait for Approval (form)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        4592,
+        7792
+      ],
+      "webhookId": "f527b7a3-0eea-43da-bcc0-c26f0cb046cf"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "eced2e3e-e325-49fe-bfd2-811f26872a59",
+              "leftValue": "={{ ['Approve all', 'Approve except excluded'].includes($json.Decision) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7eecbf5f-f887-4911-94df-72e38e4faaca",
+      "name": "Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        4816,
+        7792
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const f = $input.first().json;\nconst excluded = String(f['Exclude (row numbers, comma-separated)'] || '').split(',').map(s => parseInt(s.trim(), 10)).filter(Boolean);\nconst drafts = $('Bundle for Approval').first().json.drafts;\nreturn drafts\n  .filter(d => d.issues.length === 0 && d.draft && !(f.Decision === 'Approve except excluded' && excluded.includes(d.no)))\n  .map(d => ({ json: { ...d, approvedBy: f['Approved by'], approvedAt: new Date().toISOString() } }));"
+      },
+      "id": "9dbbae58-9a9c-4396-9f7e-11488c1d3da5",
+      "name": "Release Approved Messages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5024,
+        7680
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "2b7c342b-b052-4d48-b3c4-bdd3117d45ac",
+              "leftValue": "={{ !!$json.contact.email }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "550982cd-362d-4303-bd76-9c36f381bdc4",
+      "name": "Has Email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        5248,
+        7680
+      ]
+    },
+    {
+      "parameters": {
+        "toRecipients": "={{ $json.contact.email }}",
+        "subject": "={{ $json.draft.emailSubject }}",
+        "bodyContent": "={{ $json.draft.emailBody.replace(/\\n/g, '<br>') }}",
+        "additionalFields": {
+          "bodyContentType": "html"
+        }
+      },
+      "id": "380fc14b-653b-4b58-95d5-d5a0f46e6bf1",
+      "name": "Send Email to Client",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        5472,
+        7584
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "webhookId": "106f28a7-3a13-4bba-aaea-3b37294547fe",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "name": "Microsoft Outlook account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR-SMS-PROVIDER/api/send",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ to: $json.contact.mobile, message: $json.draft.sms }) }}",
+        "options": {}
+      },
+      "id": "0972c619-0070-4dfb-9663-de26b22c0cb2",
+      "name": "Send SMS (configure provider)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5472,
+        7792
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const d = $('Release Approved Messages').item.json;\nreturn { json: { loggedAt: new Date().toISOString(), halaxyPatientId: d.patientId,\n  channel: d.contact.email ? 'email' : 'sms', approvedBy: d.approvedBy, result: 'SENT' } };"
+      },
+      "id": "0ddba9a0-7506-414e-b643-17bfb1781bb8",
+      "name": "Log Sent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5696,
+        7680
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const f = $input.first().json;\nreturn [{ json: { loggedAt: new Date().toISOString(), halaxyPatientId: '', channel: '',\n  approvedBy: f['Approved by'] || '', result: f.Decision ? 'REJECTED BY APPROVER' : 'NO RESPONSE – NOTHING SENT' } }];"
+      },
+      "id": "e67ce4d1-3a9f-4986-ba30-f5236128455b",
+      "name": "Log Not Sent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5024,
+        7952
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## DEMO MODE\n1. Put **your own email** in Config → `demoClientEmail` (and `approverMailbox`).\n2. Execute workflow → you get an approval email with AI drafts.\n3. Open the form link, approve → the 'client' emails arrive in your inbox.\nHalaxy returns 3 sample cancellations (1 already rebooked → skipped).",
+        "height": 240,
+        "width": 560,
+        "color": 2
+      },
+      "id": "7386b350-8de2-4c04-bbb0-596b12ae96d6",
+      "name": "Demo Banner [03]",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2432,
+        7328
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 99 · Monitoring\nSet this as the **Error Workflow** in the settings of workflows 01–03.\n\n**Error Trigger** – any unhandled failure emails IT immediately and is logged. The alert contains workflow, node, a scrubbed error message and a link to the execution – **no client data** (emails/phones/dates are stripped from error text).\n\n**Daily 8am health check** – uses the n8n API to count failed executions in the last 24h per workflow and sends a short digest, so silent problems (e.g. expired Microsoft/Xero tokens) are caught even when nobody is watching.",
+        "height": 360,
+        "width": 560,
+        "color": 4
+      },
+      "id": "e8808046-1c0e-4142-b8f6-50bb8527f18b",
+      "name": "Sticky Note 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1664,
+        8544
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "8277bbc1-8d97-45e9-9875-8933e59bb860",
+      "name": "On Workflow Error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        1728,
+        9024
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const e = $json;\nconst scrub = s => String(s || '')\n  .replace(/[\\w.+-]+@[\\w-]+(\\.[\\w-]+)+/g, '[email]')\n  .replace(/\\+?\\d[\\d\\s-]{7,}\\d/g, '[number]')\n  .replace(/\\b\\d{4}-\\d{2}-\\d{2}\\b/g, '[date]')\n  .slice(0, 400);\nconst wf = (e.workflow && e.workflow.name) || 'Unknown workflow';\nconst node = (e.execution && e.execution.lastNodeExecuted) || 'unknown node';\nconst msg = scrub(e.execution && e.execution.error && e.execution.error.message);\nreturn { json: {\n  subject: `[n8n ALERT] ${wf} failed at \"${node}\"`,\n  html: `<p><b>Workflow:</b> ${wf}<br><b>Node:</b> ${node}<br><b>Error:</b> ${msg}</p>\n         <p><a href=\"${(e.execution && e.execution.url) || '#'}\">Open execution in n8n</a></p>`,\n  log: { loggedAt: new Date().toISOString(), workflow: wf, node, error: msg, executionId: (e.execution && e.execution.id) || '' }\n} };"
+      },
+      "id": "80e30a34-196e-4db8-816f-e66e11cf2c41",
+      "name": "Format Alert (no client data)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1952,
+        9024
+      ]
+    },
+    {
+      "parameters": {
+        "toRecipients": "__YOUR_EMAIL__",
+        "subject": "={{ $json.subject }}",
+        "bodyContent": "={{ $json.html }}",
+        "additionalFields": {
+          "importance": "High",
+          "bodyContentType": "html"
+        }
+      },
+      "id": "ec796fa2-7a52-41fd-8fe6-e3247c61f5e0",
+      "name": "Email IT Alert",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        2176,
+        9024
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "webhookId": "149f00fd-c625-43cc-b5a3-3ef57c9cc138",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "name": "Microsoft Outlook account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return { json: $('Format Alert (no client data)').item.json.log };"
+      },
+      "id": "19da5f34-fd75-4f4b-856b-f8870c879ef7",
+      "name": "Shape Error Log Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2384,
+        9024
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "bbcb73e2-75cf-41b2-a06d-44a52385ab05",
+      "name": "Daily 8am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        1728,
+        9328
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "execution",
+        "returnAll": true,
+        "filters": {
+          "status": "error"
+        },
+        "options": {},
+        "requestOptions": {}
+      },
+      "id": "74ae3f53-39e0-499e-9ea4-a2d06ec0e4ac",
+      "name": "n8n: Failed Executions",
+      "type": "n8n-nodes-base.n8n",
+      "typeVersion": 1,
+      "position": [
+        1952,
+        9328
+      ],
+      "credentials": {
+        "n8nApi": {
+          "name": "n8n account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const since = Date.now() - 24 * 3600 * 1000;\nconst fails = $input.all().map(i => i.json).filter(x => x && x.id && new Date(x.startedAt).getTime() >= since);\nconst byWf = {};\nfor (const f of fails) byWf[f.workflowId] = (byWf[f.workflowId] || 0) + 1;\nconst rows = Object.entries(byWf).map(([id, n]) => `<li>Workflow ${id}: ${n} failure(s)</li>`).join('');\nreturn [{ json: {\n  subject: fails.length ? `[n8n health] ${fails.length} failed run(s) in the last 24h` : '[n8n health] All automations ran cleanly',\n  html: fails.length ? `<ul>${rows}</ul><p>Check the Error Log sheet for details.</p>` : '<p>No failed executions in the last 24 hours.</p>'\n} }];"
+      },
+      "id": "ce8e4183-f5b4-4792-a2ba-b9b9a4c0bedc",
+      "name": "Summarise Last 24h",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2176,
+        9328
+      ]
+    },
+    {
+      "parameters": {
+        "toRecipients": "__YOUR_EMAIL__",
+        "subject": "={{ $json.subject }}",
+        "bodyContent": "={{ $json.html }}",
+        "additionalFields": {
+          "bodyContentType": "html"
+        }
+      },
+      "id": "d37ce609-57e1-4b71-8d21-a4f5f9bb9d23",
+      "name": "Email Daily Digest",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        2384,
+        9328
+      ],
+      "webhookId": "d33a0a41-05f6-4d55-9884-b730c6552aef",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "name": "Microsoft Outlook account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {}
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        1552,
+        5152
+      ],
+      "id": "0b2e8d9f-ce86-43e7-b0d3-dbb47cc0a736",
+      "name": "Demo: Run With Sample Referrals"
+    },
+    {
+      "parameters": {
+        "resource": "worksheet",
+        "operation": "append",
+        "workbook": {
+          "__rl": true,
+          "value": "={{ \"__EXCEL_WORKBOOK_ID__\" }}",
+          "mode": "id"
+        },
+        "worksheet": {
+          "__rl": true,
+          "value": "{00000000-0001-0000-0100-000000000000}",
+          "mode": "id"
+        },
+        "dataMode": "autoMap",
+        "options": {}
+      },
+      "id": "3ec2f063-b311-440d-89ea-319d5f49507b",
+      "name": "Append to Sync Log",
+      "type": "n8n-nodes-base.microsoftExcel",
+      "typeVersion": 2.1,
+      "position": [
+        5152,
+        6368
+      ],
+      "credentials": {
+        "microsoftExcelOAuth2Api": {
+          "name": "Allied Health Automation Suite"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "worksheet",
+        "operation": "append",
+        "workbook": {
+          "__rl": true,
+          "value": "={{ \"__EXCEL_WORKBOOK_ID__\" }}",
+          "mode": "id"
+        },
+        "worksheet": {
+          "__rl": true,
+          "value": "{00000000-0001-0000-0300-000000000000}",
+          "mode": "id"
+        },
+        "dataMode": "autoMap",
+        "options": {}
+      },
+      "id": "e65021ba-b005-4fb1-a826-6e5e2d41e592",
+      "name": "Append to Error Log",
+      "type": "n8n-nodes-base.microsoftExcel",
+      "typeVersion": 2.1,
+      "position": [
+        2592,
+        9024
+      ],
+      "credentials": {
+        "microsoftExcelOAuth2Api": {
+          "name": "Allied Health Automation Suite"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "worksheet",
+        "operation": "append",
+        "workbook": {
+          "__rl": true,
+          "value": "={{ \"__EXCEL_WORKBOOK_ID__\" }}",
+          "mode": "id"
+        },
+        "worksheet": {
+          "__rl": true,
+          "value": "{00000000-0001-0000-0200-000000000000}",
+          "mode": "id"
+        },
+        "dataMode": "autoMap",
+        "options": {}
+      },
+      "id": "0392925c-8815-4799-a801-ae577830458f",
+      "name": "Append to Outreach Log",
+      "type": "n8n-nodes-base.microsoftExcel",
+      "typeVersion": 2.1,
+      "position": [
+        5888,
+        7792
+      ],
+      "credentials": {
+        "microsoftExcelOAuth2Api": {
+          "name": "Allied Health Automation Suite"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Run Check": {
+      "main": [
+        [
+          {
+            "node": "Config [00]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config [00]": {
+      "main": [
+        [
+          {
+            "node": "Halaxy: Get Token [00]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Halaxy: Get Token [00]": {
+      "main": [
+        [
+          {
+            "node": "Halaxy: Get CapabilityStatement",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Halaxy: Get CapabilityStatement": {
+      "main": [
+        [
+          {
+            "node": "Summarise Capabilities",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New Referral Email": {
+      "main": [
+        [
+          {
+            "node": "Config [01]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config [01]": {
+      "main": [
+        [
+          {
+            "node": "Skip Already-Processed Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Already-Processed Emails": {
+      "main": [
+        [
+          {
+            "node": "Pre-process & Tokenise Identifiers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pre-process & Tokenise Identifiers": {
+      "main": [
+        [
+          {
+            "node": "AI: Extract Referral Fields (Groq)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI: Extract Referral Fields (Groq)": {
+      "main": [
+        [
+          {
+            "node": "Parse & Validate Referral",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Exception for Staff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Validate Referral": {
+      "main": [
+        [
+          {
+            "node": "Ready for Halaxy?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ready for Halaxy?": {
+      "main": [
+        [
+          {
+            "node": "Halaxy: Get Token [01]",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Exception for Staff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Halaxy: Get Token [01]": {
+      "main": [
+        [
+          {
+            "node": "Halaxy: Search Patient (surname + DOB)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Exception for Staff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Halaxy: Search Patient (surname + DOB)": {
+      "main": [
+        [
+          {
+            "node": "Match Existing Client",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Exception for Staff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match Existing Client": {
+      "main": [
+        [
+          {
+            "node": "Needs Staff Review?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Staff Review?": {
+      "main": [
+        [
+          {
+            "node": "Build Exception for Staff",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "New Client?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New Client?": {
+      "main": [
+        [
+          {
+            "node": "Halaxy: Create Patient",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Halaxy: Create Referral",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Halaxy: Create Patient": {
+      "main": [
+        [
+          {
+            "node": "Capture New Patient ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Exception for Staff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Capture New Patient ID": {
+      "main": [
+        [
+          {
+            "node": "Halaxy: Create Referral",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Halaxy: Create Referral": {
+      "main": [
+        [
+          {
+            "node": "Build Audit Row (success)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Exception for Staff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Audit Row (success)": {
+      "main": [
+        [
+          {
+            "node": "Log to Audit Sheet (success)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to Audit Sheet (success)": {
+      "main": [
+        [
+          {
+            "node": "Move Email to 'Processed'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Move Email to 'Processed'": {
+      "main": [
+        [
+          {
+            "node": "Acknowledge Referrer (enable after testing)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Exception for Staff": {
+      "main": [
+        [
+          {
+            "node": "Email Staff Review Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Staff Review Queue": {
+      "main": [
+        [
+          {
+            "node": "Shape Exception Audit Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape Exception Audit Row": {
+      "main": [
+        [
+          {
+            "node": "Log to Audit Sheet (exception)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to Audit Sheet (exception)": {
+      "main": [
+        [
+          {
+            "node": "Move Email to 'Needs Review'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sample Referral Emails": {
+      "main": [
+        [
+          {
+            "node": "Config [01]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every Hour (business days)": {
+      "main": [
+        [
+          {
+            "node": "Config [02]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config [02]": {
+      "main": [
+        [
+          {
+            "node": "Xero: Get Connected Organisations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Xero: Get Connected Organisations": {
+      "main": [
+        [
+          {
+            "node": "Pick Xero Organisation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Sync Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick Xero Organisation": {
+      "main": [
+        [
+          {
+            "node": "Halaxy: Get Token [02]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Halaxy: Get Token [02]": {
+      "main": [
+        [
+          {
+            "node": "Halaxy: Recently Updated Invoices",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Sync Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Halaxy: Recently Updated Invoices": {
+      "main": [
+        [
+          {
+            "node": "Flatten & Map Invoices",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Sync Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flatten & Map Invoices": {
+      "main": [
+        [
+          {
+            "node": "Xero: Find Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Xero: Find Contact": {
+      "main": [
+        [
+          {
+            "node": "Resolve Contact",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Sync Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Contact": {
+      "main": [
+        [
+          {
+            "node": "Contact Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contact Exists?": {
+      "main": [
+        [
+          {
+            "node": "Xero: Check Invoice Exists",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Xero: Create Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Xero: Create Contact": {
+      "main": [
+        [
+          {
+            "node": "Capture Contact ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Sync Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Capture Contact ID": {
+      "main": [
+        [
+          {
+            "node": "Xero: Check Invoice Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Xero: Check Invoice Exists": {
+      "main": [
+        [
+          {
+            "node": "Flag Duplicates",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Sync Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flag Duplicates": {
+      "main": [
+        [
+          {
+            "node": "Already in Xero?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Already in Xero?": {
+      "main": [
+        [
+          {
+            "node": "Log Row: Skipped Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Xero: Create Draft Invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Xero: Create Draft Invoice": {
+      "main": [
+        [
+          {
+            "node": "Log Row: Created",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Sync Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Row: Created": {
+      "main": [
+        [
+          {
+            "node": "Append to Sync Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Row: Skipped Duplicate": {
+      "main": [
+        [
+          {
+            "node": "Append to Sync Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Sync Error": {
+      "main": [
+        [
+          {
+            "node": "Alert Finance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekdays 4:30pm": {
+      "main": [
+        [
+          {
+            "node": "Config [03]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config [03]": {
+      "main": [
+        [
+          {
+            "node": "Halaxy: Get Token [03]",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Halaxy: Get Token [03]": {
+      "main": [
+        [
+          {
+            "node": "Halaxy: Cancelled Today",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Halaxy: Cancelled Today": {
+      "main": [
+        [
+          {
+            "node": "List Cancelled Clients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Cancelled Clients": {
+      "main": [
+        [
+          {
+            "node": "Halaxy: Future Bookings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Halaxy: Future Bookings": {
+      "main": [
+        [
+          {
+            "node": "Not Yet Rebooked?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Not Yet Rebooked?": {
+      "main": [
+        [
+          {
+            "node": "Halaxy: Get Patient",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Halaxy: Get Patient": {
+      "main": [
+        [
+          {
+            "node": "Minimum Data for AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Minimum Data for AI": {
+      "main": [
+        [
+          {
+            "node": "AI: Draft Messages (Groq)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI: Draft Messages (Groq)": {
+      "main": [
+        [
+          {
+            "node": "Check Drafts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Drafts": {
+      "main": [
+        [
+          {
+            "node": "Bundle for Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bundle for Approval": {
+      "main": [
+        [
+          {
+            "node": "Email Approver",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Approver": {
+      "main": [
+        [
+          {
+            "node": "Wait for Approval (form)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Approval (form)": {
+      "main": [
+        [
+          {
+            "node": "Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved?": {
+      "main": [
+        [
+          {
+            "node": "Release Approved Messages",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Not Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Release Approved Messages": {
+      "main": [
+        [
+          {
+            "node": "Has Email?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Email?": {
+      "main": [
+        [
+          {
+            "node": "Send Email to Client",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send SMS (configure provider)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email to Client": {
+      "main": [
+        [
+          {
+            "node": "Log Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send SMS (configure provider)": {
+      "main": [
+        [
+          {
+            "node": "Log Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Sent": {
+      "main": [
+        [
+          {
+            "node": "Append to Outreach Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Not Sent": {
+      "main": [
+        [
+          {
+            "node": "Append to Outreach Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "On Workflow Error": {
+      "main": [
+        [
+          {
+            "node": "Format Alert (no client data)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Alert (no client data)": {
+      "main": [
+        [
+          {
+            "node": "Email IT Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email IT Alert": {
+      "main": [
+        [
+          {
+            "node": "Shape Error Log Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape Error Log Row": {
+      "main": [
+        [
+          {
+            "node": "Append to Error Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily 8am": {
+      "main": [
+        [
+          {
+            "node": "n8n: Failed Executions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "n8n: Failed Executions": {
+      "main": [
+        [
+          {
+            "node": "Summarise Last 24h",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarise Last 24h": {
+      "main": [
+        [
+          {
+            "node": "Email Daily Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Demo: Run With Sample Referrals": {
+      "main": [
+        [
+          {
+            "node": "Sample Referral Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "nodeGroups": [],
+  "tags": []
+}
