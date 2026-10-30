@@ -1,0 +1,7 @@
+# Never commit live credentials or unredacted exports
+.env
+*.env
+*-original.json
+*.credentials.json
+.DS_Store
+Thumbs.db
